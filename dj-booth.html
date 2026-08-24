@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DJ Booth</title>
+<title>SCDJ</title>
 <style>
   :root{
     /* deck theme */
@@ -93,7 +93,7 @@
   .d-wave-wrap{position:relative; border-radius:6px; overflow:hidden; background:var(--panel2); border:1px solid var(--border); flex:none;}
   .d-wave{display:block; width:100%; height:16px; cursor:pointer; touch-action:none;}
   .d-times{display:flex; justify-content:space-between; font-size:10px; color:var(--muted); font-variant-numeric:tabular-nums;}
-  /* Last 20s of the track: the remaining-time readout blinks as a warning. */
+  /* Last 30s of the track: the remaining-time readout blinks as a warning. */
   @keyframes durBlink{ 0%,49.9%{opacity:1;} 50%,100%{opacity:0;} }
   .d-dur.blink-warn{ color:var(--bad); animation:durBlink 1s linear infinite; }
 
@@ -144,8 +144,8 @@
   }
   .deck-btn.cue{
     background:radial-gradient(circle,
-      #9a9c9f 0%, #9a9c9f 59%,
-      var(--accent) 59%, var(--accent) 88%,
+      #9a9c9f 0%, #9a9c9f 64%,
+      var(--accent) 64%, var(--accent) 88%,
       var(--metal) 88%, var(--metal) 100%);
   }
   /* CUE also lights up while the deck is playing, and blinks in sync with
@@ -153,22 +153,22 @@
      buttons together). */
   .deck-btn.cue.is-armed, .deck-btn.cue.is-playing, .deck-btn.cue.stutter-blink{
     background:radial-gradient(circle,
-      var(--accent) 0%, var(--accent) 59%,
-      var(--accent) 59%, var(--accent) 88%,
+      var(--accent) 0%, var(--accent) 64%,
+      var(--accent) 64%, var(--accent) 88%,
       var(--metal) 88%, var(--metal) 100%);
     color:#2a1200;
   }
   .deck-btn.play{
     background:radial-gradient(circle,
-      #9a9c9f 0%, #9a9c9f 59%,
-      var(--good) 59%, var(--good) 88%,
+      #9a9c9f 0%, #9a9c9f 64%,
+      var(--good) 64%, var(--good) 88%,
       var(--metal) 88%, var(--metal) 100%);
   }
   /* Blinks in time with the stutter cue's on/off cycle while paused-with-jerks. */
   .deck-btn.play.is-playing, .deck-btn.play.stutter-blink{
     background:radial-gradient(circle,
-      var(--good) 0%, var(--good) 59%,
-      var(--good) 59%, var(--good) 88%,
+      var(--good) 0%, var(--good) 64%,
+      var(--good) 64%, var(--good) 88%,
       var(--metal) 88%, var(--metal) 100%);
     color:#06251a;
   }
@@ -463,13 +463,13 @@
 
   <div class="settings-panel" id="settingsPanel" hidden>
     <label>SoundCloud client_id
-      <input type="text" id="cidInput" placeholder="новый client_id">
+      <input type="text" id="cidInput" placeholder="new client_id">
     </label>
-    <label>Адрес API-прокси (пусто = тот же адрес, с которого открыта страница)
+    <label>API proxy address (empty = same origin as this page)
       <input type="text" id="apiBaseInput" placeholder="https://sc-proxy.your-name.workers.dev">
     </label>
-    <button class="save" id="settingsSave">Сохранить</button>
-    <p class="settings-note">Общие для обеих дек. client_id обновляйте, если загрузка треков перестала работать (см. DevTools → Network на soundcloud.com).</p>
+    <button class="save" id="settingsSave">Save</button>
+    <p class="settings-note">Shared by both decks. Update client_id if track loading stops working (see DevTools → Network on soundcloud.com).</p>
   </div>
 
   <div class="decks-row">
@@ -1210,14 +1210,14 @@
     els.zoomWave.addEventListener("pointercancel", function(){ zoomDragging = false; zoomAutoScrollDir = 0; });
 
     // Right-hand readout shows time remaining (not total duration), with a
-    // minus sign, blinking once 20s or less are left in the track.
-    var BLINK_REMAINING_SEC = 20;
+    // minus sign, blinking once 30s or less are left in the track.
+    var BLINK_REMAINING_SEC = 30;
     function updateTimeDisplay(){
       els.curTime.textContent = fmt(getPosition());
       var remaining = engineDuration() - getPosition();
       if (!isFinite(remaining) || remaining < 0) remaining = 0;
       els.durTime.textContent = "-" + fmt(remaining);
-      els.durTime.classList.toggle("blink-warn", remaining <= BLINK_REMAINING_SEC);
+      els.durTime.classList.toggle("blink-warn", remaining > 0 && remaining <= BLINK_REMAINING_SEC);
     }
 
     function waveLoop(){
@@ -1246,15 +1246,15 @@
     }
 
     function loadTrack(url){
-      setStatus("Загрузка...", "");
+      setStatus("Loading...", "");
       els.loadBtn.disabled = true;
       proxyFetch("/api/resolve", { url: url, client_id: clientId })
         .then(function(track){
-          if (track.kind !== "track") throw new Error("Не трек (плейлисты не поддерживаются)");
+          if (track.kind !== "track") throw new Error("Not a track (playlists aren't supported)");
           var transcodings = (track.media && track.media.transcodings) || [];
           var t = transcodings.find(function(x){ return x.format && x.format.protocol === "progressive"; })
                || transcodings.find(function(x){ return x.format && x.format.protocol === "hls"; });
-          if (!t) throw new Error("Нет доступного потока");
+          if (!t) throw new Error("No available stream");
           var streamPromise = proxyFetch("/api/media", { url: t.url, client_id: clientId });
           var wavePromise = track.waveform_url
             ? fetch(track.waveform_url).then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; })
@@ -1264,7 +1264,7 @@
           });
         })
         .then(function(res){
-          setStatus("Декодирую...", "");
+          setStatus("LOADING...", "");
           return fetch(res.streamUrl)
             .then(function(r){ return r.arrayBuffer(); })
             .then(function(buf){ resumeCtx(); return audioCtx.decodeAudioData(buf); })
@@ -1289,7 +1289,7 @@
           updateTimeDisplay();
           renderTransportUI(); drawWave(); drawZoom();
         })
-        .catch(function(err){ setStatus("Ошибка: " + err.message, "err"); })
+        .catch(function(err){ setStatus("Error: " + err.message, "err"); })
         .finally(function(){ els.loadBtn.disabled = false; });
     }
 

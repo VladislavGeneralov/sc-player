@@ -33,7 +33,9 @@ const server = http.createServer((req, res) => {
   if (u.pathname === "/" || u.pathname === "/soundcloud-player.html") {
     fs.readFile(HTML_FILE, function (err, data) {
       if (err) { res.writeHead(500); res.end("Cannot read soundcloud-player.html"); return; }
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      // no-store: this file gets edited constantly during development, and
+      // browsers will otherwise happily serve a stale cached copy on reload.
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
       res.end(data);
     });
     return;
@@ -46,7 +48,7 @@ const server = http.createServer((req, res) => {
     var filePath = path.join(__dirname, path.basename(u.pathname));
     fs.readFile(filePath, function (err, data) {
       if (err) { res.writeHead(404); res.end("Not found"); return; }
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
       res.end(data);
     });
     return;
