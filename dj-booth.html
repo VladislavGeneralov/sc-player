@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>SCDJ</title>
 <style>
   :root{
@@ -14,11 +14,20 @@
     --mx-black:#0d0d0e; --mx-black2:#1c1d1f; --mx-ink-muted:#61656b;
     --mx-groove:#141416; --led-green:#3ecf6e; --led-yellow:#e8c93e; --led-red:#ff4d4d;
   }
-  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  /* Blocks every stray mobile-browser gesture that could fight the deck's own
+     touch controls: pinch/double-tap zoom, iOS long-press callout+copy menu,
+     drag-to-save on any element, pull-to-refresh and rubber-band overscroll,
+     text selection while dragging a fader across other text. */
+  *{
+    box-sizing:border-box; -webkit-tap-highlight-color:transparent;
+    -webkit-touch-callout:none; -webkit-user-drag:none;
+  }
+  html{ overscroll-behavior:none; touch-action:manipulation; }
   body{
     margin:0; background:#0a0b0d; color:var(--text);
     font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
     display:flex; justify-content:center; user-select:none;
+    overscroll-behavior:none; touch-action:manipulation;
   }
   /* One layout for phone and desktop: a fixed, mobile-width portrait column,
      centered on wider screens rather than stretched into a "desktop" layout.
@@ -531,6 +540,19 @@
   document.addEventListener("pointerdown", resumeCtx);
   document.addEventListener("keydown", resumeCtx);
 
+  // Belt-and-suspenders on top of the CSS (touch-action/overscroll-behavior):
+  // blocks the long-press context menu, drag-to-save, Safari's own pinch-zoom
+  // gesture events, and multi-finger pinch touchmoves from ever reaching the
+  // browser's default handling anywhere on the page.
+  document.addEventListener("contextmenu", function(e){ e.preventDefault(); });
+  document.addEventListener("dragstart", function(e){ e.preventDefault(); });
+  ["gesturestart", "gesturechange", "gestureend"].forEach(function(type){
+    document.addEventListener(type, function(e){ e.preventDefault(); });
+  });
+  document.addEventListener("touchmove", function(e){
+    if (e.touches && e.touches.length > 1) e.preventDefault();
+  }, { passive: false });
+
   // ---- Shared settings (client_id / API proxy base), used by both decks ----
   var DEFAULT_CLIENT_ID = "Pb72ranhoyt6gw7hM7TkzUItXlMWSNSo";
   var clientId = localStorage.getItem("sc_client_id") || DEFAULT_CLIENT_ID;
@@ -554,7 +576,8 @@
     settingsPanel.hidden = true;
   });
 
-  var DEFAULT_TRACK_URL = "https://soundcloud.com/hooletronica/ellectroniqa-greasy";
+  var DEFAULT_TRACK_URL_A = "https://soundcloud.com/recordeep-mag/premiere-unknown-artist-untitled-01-uknwn01?in_system_playlist=personalized-tracks%3A%3Ahooletronica%3A652496882";
+  var DEFAULT_TRACK_URL_B = "https://soundcloud.com/peardublin/new-members-soma-pear005?in_system_playlist=personalized-tracks%3A%3Ahooletronica%3A652496882";
 
   // =========================================================================
   // Deck factory — one Pioneer-CDJ-style deck (Web Audio playback engine:
@@ -683,7 +706,7 @@
     var STUTTER_FRAME = 1 / 75;             // ~13.3ms, one CD frame
     var STUTTER_CYCLE = STUTTER_FRAME * 18 / 1.4 * 1.15; // 18x slower than a bare loop, 1.4x faster, then 15% slower again
     var STUTTER_CHUNK = STUTTER_CYCLE / 2;  // play half the cycle, silence for the other half
-    var CUE_EPS = 0.15;
+    var CUE_EPS = 0.04; // was 0.15, then 0.03, then removed entirely, then 0.1, now 0.04
     var stutterTimer = null;
     var stutterBlinkOffTimer = null;
     var stutterPos = 0;
@@ -795,7 +818,7 @@
       sourceNode.playbackRate.linearRampToValueAtTime(toRate, now + duration);
     }
 
-    var NUDGE_PERCENT = 8;      // how far a held jog button bends the rate (was 6, then 4)
+    var NUDGE_PERCENT = 7.36;   // how far a held jog button bends the rate (was 8, -8% relative; before that 6, then 4)
     var NUDGE_RAMP_IN = 0.1;    // seconds to bend in — stays quick, snappy response
     var NUDGE_RAMP_OUT = 0.3;   // seconds to settle back to tempo — slower, smoother release
     function nudgeStart(direction){ startRateRamp(currentRate * (1 + direction * NUDGE_PERCENT / 100), NUDGE_RAMP_IN); }
@@ -1081,7 +1104,7 @@
 
     // ---- Zoom waveform (scrolling ~1.5s window, sample-accurate peaks) ----
     var zoomCtx = els.zoomWave.getContext("2d");
-    var ZOOM_WINDOW_SEC = 1.5;
+    var ZOOM_WINDOW_SEC = 2;
     var zoomPeaks = null;
     var zoomBucketDur = 0.005;
 
@@ -1194,8 +1217,8 @@
       if (!zoomDragging || !audioBuffer) return;
       var rect = els.zoomWave.getBoundingClientRect();
       var clientY = (e.touches && e.touches[0]) ? e.touches[0].clientY : e.clientY;
-      if (clientY < rect.top){ zoomAutoScrollDir = -1; zoomAutoScrollKick(); return; }
-      if (clientY > rect.bottom){ zoomAutoScrollDir = 1; zoomAutoScrollKick(); return; }
+      if (clientY < rect.top){ zoomAutoScrollDir = 1; zoomAutoScrollKick(); return; }
+      if (clientY > rect.bottom){ zoomAutoScrollDir = -1; zoomAutoScrollKick(); return; }
       if (zoomAutoScrollDir !== 0){
         // Just came back inside bounds after auto-scrolling — re-anchor the
         // drag reference here so position doesn't jump on the transition.
@@ -1203,7 +1226,8 @@
         zoomDragStartY = clientY; zoomDragStartPos = getPosition();
         return;
       }
-      var dt = ((clientY - zoomDragStartY) / rect.height) * ZOOM_DRAG_WINDOW_SEC;
+      // Inverted: dragging down moves backward, dragging up moves forward.
+      var dt = -((clientY - zoomDragStartY) / rect.height) * ZOOM_DRAG_WINDOW_SEC;
       hardSeek(zoomDragStartPos + dt); drawWave(); drawZoom();
     });
     els.zoomWave.addEventListener("pointerup", function(){ zoomDragging = false; zoomAutoScrollDir = 0; });
@@ -1445,8 +1469,8 @@
   }
 
   // ---- instantiate: two decks, two mixer channels, wired together ----
-  var deckA = createDeck({ root: document.getElementById("deckA"), id: "A", defaultTrackUrl: DEFAULT_TRACK_URL, mirror: false });
-  var deckB = createDeck({ root: document.getElementById("deckB"), id: "B", defaultTrackUrl: DEFAULT_TRACK_URL, mirror: true });
+  var deckA = createDeck({ root: document.getElementById("deckA"), id: "A", defaultTrackUrl: DEFAULT_TRACK_URL_A, mirror: false });
+  var deckB = createDeck({ root: document.getElementById("deckB"), id: "B", defaultTrackUrl: DEFAULT_TRACK_URL_B, mirror: true });
   var chA = createChannel("1", deckA.output,
     document.getElementById("eqColA"), document.getElementById("faderColA"), document.getElementById("meterA"));
   var chB = createChannel("2", deckB.output,
