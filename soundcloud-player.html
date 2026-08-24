@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>SC Player+</title>
+<style>
+  :root{
+    --bg:#111318; --panel:#1a1d24; --panel2:#20242c; --text:#eef0f4; --muted:#8b93a3;
+    --accent:#ff5500; --accent2:#ff7a33; --border:#2a2f39; --good:#3ecf8e; --bad:#ff5d5d;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; min-height:100vh; background:var(--bg); color:var(--text);
+    font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    display:flex; justify-content:center; padding:32px 16px;
+  }
+  .app{width:100%; max-width:720px; display:flex; flex-direction:column; gap:16px;}
+  h1{font-size:18px; margin:0 0 4px; font-weight:600; letter-spacing:.2px;}
+  .sub{color:var(--muted); font-size:13px; margin:0 0 8px;}
+  .card{background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:18px;}
+  label{font-size:12px; color:var(--muted); display:block; margin-bottom:6px;}
+  input[type=text], input[type=url]{
+    width:100%; background:var(--panel2); border:1px solid var(--border); color:var(--text);
+    padding:10px 12px; border-radius:8px; font-size:14px; outline:none;
+  }
+  input[type=text]:focus, input[type=url]:focus{border-color:var(--accent);}
+  .row{display:flex; gap:10px; align-items:flex-end;}
+  .row > div{flex:1;}
+  button{
+    background:var(--accent); color:#fff; border:none; border-radius:8px; padding:10px 16px;
+    font-size:14px; font-weight:600; cursor:pointer; transition:background .15s;
+  }
+  button:hover{background:var(--accent2);}
+  button.ghost{background:transparent; border:1px solid var(--border); color:var(--text); font-weight:500;}
+  button.ghost:hover{background:var(--panel2);}
+  button:disabled{opacity:.4; cursor:not-allowed;}
+  .status{font-size:12px; margin-top:8px; min-height:16px;}
+  .status.err{color:var(--bad);}
+  .status.ok{color:var(--good);}
+  .player{display:none; flex-direction:column; gap:14px;}
+  .meta{display:flex; gap:12px; align-items:center;}
+  .meta img{width:64px; height:64px; border-radius:8px; object-fit:cover; background:#000;}
+  .meta .txt{overflow:hidden;}
+  .meta .title{font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .meta .artist{font-size:13px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .waveform-wrap{position:relative; border-radius:8px; overflow:hidden; background:var(--panel2); border:1px solid var(--border);}
+  #wave{display:block; width:100%; height:110px; cursor:pointer; touch-action:none;}
+  .seek-times{display:flex; justify-content:space-between;}
+  .time{font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; min-width:40px;}
+
+  .deck{display:flex; align-items:center; gap:14px;}
+  .deck-btn{
+    width:64px; height:64px; border-radius:50%; padding:0; font-size:12px; font-weight:700;
+    letter-spacing:.5px; display:flex; align-items:center; justify-content:center; user-select:none;
+    border:2px solid transparent; flex:none;
+  }
+  .deck-btn.play{background:var(--good); color:#06251a;}
+  .deck-btn.play.is-playing{background:#1c4d3a; color:var(--good); border-color:var(--good);}
+  .deck-btn.cue{background:var(--accent); color:#2a1200;}
+  .deck-btn.cue.is-armed{box-shadow:0 0 0 2px var(--accent2) inset;}
+  .deck-btn:active{transform:scale(0.94);}
+
+  .speedbox{flex:1; display:flex; flex-direction:column; gap:6px;}
+  .speedbox-top{display:flex; align-items:center; justify-content:space-between;}
+  .speedbox-top .label{font-size:12px; color:var(--muted);}
+  .speedval{font-size:16px; font-weight:700; font-variant-numeric:tabular-nums; min-width:64px; text-align:right;}
+  .speedrow{display:flex; align-items:center; gap:8px;}
+  .speedrow input[type=range]{flex:1;}
+  .speedrow button.reset{padding:4px 10px; font-size:11px; background:var(--panel2); color:var(--text); border:1px solid var(--border);}
+
+  .vol{display:flex; align-items:center; gap:8px; width:110px; flex:none;}
+  .vol input[type=range]{flex:1;}
+
+  .hint{font-size:11px; color:var(--muted); line-height:1.5;}
+  a{color:var(--accent2);}
+  input[type=range]{-webkit-appearance:none; height:4px; background:var(--border); border-radius:2px; outline:none;}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:14px; height:14px; border-radius:50%; background:var(--accent); cursor:pointer;}
+  input[type=range]::-moz-range-thumb{width:14px; height:14px; border-radius:50%; background:var(--accent); border:none; cursor:pointer;}
+  details{font-size:12px; color:var(--muted);}
+  details summary{cursor:pointer;}
+  details .fixbox{margin-top:8px; display:flex; gap:8px;}
+  details .fixbox input{flex:1;}
+</style>
+</head>
+<body>
+<div class="app">
+  <div>
+    <h1>SC Player+</h1>
+    <p class="sub">SoundCloud плеер в стиле Pioneer CDJ: питч-фейдер ±50% и одна точка CUE. Работает через прямой аудио-поток (без embed-виджета).</p>
+  </div>
+
+  <div class="card">
+    <label for="url">Ссылка на трек SoundCloud</label>
+    <div class="row">
+      <div><input type="url" id="url" placeholder="https://soundcloud.com/artist/track"></div>
+      <button id="loadBtn">Загрузить</button>
+    </div>
+    <div class="status" id="status"></div>
+    <details>
+      <summary>Плеер не грузит трек? (обновить client_id)</summary>
+      <p>SoundCloud периодически меняет публичный client_id, которым пользуется его собственный сайт. Если загрузка не работает: откройте soundcloud.com в браузере → DevTools → вкладка Network → найдите любой запрос к <code>api-v2.soundcloud.com</code> → скопируйте значение параметра <code>client_id</code> из его URL и вставьте сюда.</p>
+      <div class="fixbox">
+        <input type="text" id="cidInput" placeholder="новый client_id">
+        <button class="ghost" id="cidSave">Сохранить</button>
+      </div>
+    </details>
+    <details>
+      <summary>Хостится не на localhost? (адрес API-прокси)</summary>
+      <p>Если страница открыта с GitHub Pages / другого домена, а не через <code>node server.js</code> на localhost, укажите здесь адрес развёрнутого Cloudflare Worker (например <code>https://sc-proxy.your-name.workers.dev</code>). Пусто = использовать тот же адрес, с которого открыта страница.</p>
+      <div class="fixbox">
+        <input type="text" id="apiBaseInput" placeholder="https://sc-proxy.your-name.workers.dev">
+        <button class="ghost" id="apiBaseSave">Сохранить</button>
+      </div>
+    </details>
+  </div>
+
+  <div class="card player" id="player">
+    <div class="meta">
+      <img id="art" src="" alt="">
+      <div class="txt">
+        <div class="title" id="title">—</div>
+        <div class="artist" id="artist">—</div>
+      </div>
+    </div>
+
+    <div class="waveform-wrap">
+      <canvas id="wave" height="110"></canvas>
+    </div>
+    <div class="seek-times">
+      <span class="time" id="curTime">0:00</span>
+      <span class="time" id="durTime">0:00</span>
+    </div>
+
+    <div class="deck">
+      <button class="deck-btn cue" id="cueBtn">CUE</button>
+      <button class="deck-btn play" id="playBtn">▶</button>
+
+      <div class="speedbox">
+        <div class="speedbox-top">
+          <span class="label">TEMPO</span>
+          <span class="speedval" id="speedVal">0.0%</span>
+        </div>
+        <div class="speedrow">
+          <input type="range" id="speed" min="-50" max="50" step="0.1" value="0">
+          <button class="reset" id="speedReset">0%</button>
+        </div>
+      </div>
+
+      <div class="vol">
+        <span style="font-size:12px;color:var(--muted)">🔊</span>
+        <input type="range" id="vol" min="0" max="1" step="0.01" value="1">
+      </div>
+    </div>
+
+    <p class="hint">CUE как на CDJ: на паузе — жмёте CUE, чтобы поставить точку в текущем месте. Во время игры — CUE возвращает и ставит на паузу в точке (back cue). На паузе ровно в точке — зажмите CUE для прослушки, отпустите — вернётся в точку. Пробел — play/pause.</p>
+  </div>
+
+  <audio id="audio" preload="auto"></audio>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // Public client_id used by soundcloud.com's own web client (extracted from its
+  // JS bundle and verified working on 2026-08-24). SoundCloud rotates this from
+  // time to time; if it stops working, paste a fresh one via the box below.
+  var DEFAULT_CLIENT_ID = "Pb72ranhoyt6gw7hM7TkzUItXlMWSNSo";
+  var clientId = localStorage.getItem("sc_client_id") || DEFAULT_CLIENT_ID;
+
+  // Always loaded on startup for quick local testing.
+  var DEFAULT_TRACK_URL = "https://soundcloud.com/hooletronica/ellectroniqa-greasy";
+
+  var els = {
+    url: document.getElementById("url"),
+    loadBtn: document.getElementById("loadBtn"),
+    status: document.getElementById("status"),
+    player: document.getElementById("player"),
+    art: document.getElementById("art"),
+    title: document.getElementById("title"),
+    artist: document.getElementById("artist"),
+    wave: document.getElementById("wave"),
+    curTime: document.getElementById("curTime"),
+    durTime: document.getElementById("durTime"),
+    playBtn: document.getElementById("playBtn"),
+    cueBtn: document.getElementById("cueBtn"),
+    speed: document.getElementById("speed"),
+    speedVal: document.getElementById("speedVal"),
+    speedReset: document.getElementById("speedReset"),
+    vol: document.getElementById("vol"),
+    audio: document.getElementById("audio"),
+    cidInput: document.getElementById("cidInput"),
+    cidSave: document.getElementById("cidSave"),
+    apiBaseInput: document.getElementById("apiBaseInput"),
+    apiBaseSave: document.getElementById("apiBaseSave")
+  };
+
+  var apiBase = localStorage.getItem("sc_api_base") || "";
+  els.apiBaseInput.value = apiBase;
+
+  var currentTrackKey = null;
+  var waveSamples = null;
+  var waveDragging = false;
+  var rafId = null;
+  var cuePreviewActive = false;
+
+  function fmt(t){
+    if (!isFinite(t) || t < 0) t = 0;
+    var m = Math.floor(t/60), s = Math.floor(t%60);
+    return m + ":" + (s<10?"0":"") + s;
+  }
+
+  function setStatus(msg, kind){
+    els.status.textContent = msg || "";
+    els.status.className = "status" + (kind ? " " + kind : "");
+  }
+
+  els.cidSave.addEventListener("click", function(){
+    var v = els.cidInput.value.trim();
+    if (!v) return;
+    localStorage.setItem("sc_client_id", v);
+    clientId = v;
+    setStatus("client_id обновлён, попробуйте загрузить трек снова.", "ok");
+  });
+
+  els.apiBaseSave.addEventListener("click", function(){
+    var v = els.apiBaseInput.value.trim().replace(/\/+$/, "");
+    localStorage.setItem("sc_api_base", v);
+    apiBase = v;
+    setStatus("Адрес прокси обновлён.", "ok");
+  });
+
+  // ---- Single CUE point (Pioneer CDJ style) ----
+  function cueStorageKey(){ return "sc_cue_" + currentTrackKey; }
+  function getCue(){
+    if (!currentTrackKey) return undefined;
+    var raw = localStorage.getItem(cueStorageKey());
+    return raw === null ? undefined : parseFloat(raw);
+  }
+  function setCue(t){
+    if (!currentTrackKey) return;
+    localStorage.setItem(cueStorageKey(), String(t));
+    drawWave();
+  }
+
+  var CUE_EPS = 0.15; // seconds, tolerance for "paused exactly at the cue point"
+
+  els.cueBtn.addEventListener("pointerdown", function(e){
+    e.preventDefault();
+    if (!currentTrackKey) return;
+    var cue = getCue();
+    if (els.audio.paused){
+      if (cue !== undefined && Math.abs(els.audio.currentTime - cue) < CUE_EPS){
+        // Cue Point Sampler: preview-play while held, snap back on release.
+        cuePreviewActive = true;
+        els.cueBtn.classList.add("is-armed");
+        els.audio.play();
+      } else {
+        setCue(els.audio.currentTime);
+      }
+    } else {
+      // Back cue: stop and jump to the cue point.
+      els.audio.pause();
+      els.audio.currentTime = cue !== undefined ? cue : 0;
+      if (cue === undefined) setCue(0);
+    }
+  });
+  els.cueBtn.addEventListener("pointerup", endCuePreview);
+  els.cueBtn.addEventListener("pointerleave", endCuePreview);
+  els.cueBtn.addEventListener("pointercancel", endCuePreview);
+  function endCuePreview(){
+    if (!cuePreviewActive) return;
+    cuePreviewActive = false;
+    els.cueBtn.classList.remove("is-armed");
+    var cue = getCue();
+    els.audio.pause();
+    els.audio.currentTime = cue !== undefined ? cue : 0;
+  }
+
+  document.addEventListener("keydown", function(e){
+    if (!currentTrackKey) return;
+    if (document.activeElement === els.url || document.activeElement === els.cidInput || document.activeElement === els.apiBaseInput) return;
+    if (e.code === "Space"){
+      togglePlay();
+      e.preventDefault();
+    } else if (e.code === "KeyC" && !e.repeat){
+      els.cueBtn.dispatchEvent(new PointerEvent("pointerdown"));
+      e.preventDefault();
+    }
+  });
+  document.addEventListener("keyup", function(e){
+    if (e.code === "KeyC") endCuePreview();
+  });
+
+  // ---- Tempo (Pioneer-style ±50% pitch fader) ----
+  function applySpeed(percent){
+    percent = parseFloat(percent);
+    els.audio.playbackRate = 1 + percent / 100;
+    var sign = percent > 0 ? "+" : "";
+    els.speedVal.textContent = sign + percent.toFixed(1) + "%";
+  }
+  els.speed.addEventListener("input", function(){ applySpeed(els.speed.value); });
+  els.speedReset.addEventListener("click", function(){
+    els.speed.value = 0;
+    applySpeed(0);
+  });
+  applySpeed(0);
+
+  els.vol.addEventListener("input", function(){ els.audio.volume = parseFloat(els.vol.value); });
+  els.audio.volume = 1;
+
+  // ---- Transport ----
+  function togglePlay(){
+    if (els.audio.paused) els.audio.play(); else els.audio.pause();
+  }
+  els.playBtn.addEventListener("click", togglePlay);
+  els.audio.addEventListener("play", function(){
+    els.playBtn.textContent = "❚❚";
+    els.playBtn.classList.add("is-playing");
+  });
+  els.audio.addEventListener("pause", function(){
+    els.playBtn.textContent = "▶";
+    els.playBtn.classList.remove("is-playing");
+  });
+
+  els.audio.addEventListener("loadedmetadata", function(){
+    els.durTime.textContent = fmt(els.audio.duration);
+  });
+  els.audio.addEventListener("timeupdate", function(){
+    if (waveDragging) return;
+    els.curTime.textContent = fmt(els.audio.currentTime);
+  });
+
+  // ---- Waveform ----
+  var waveCtx = els.wave.getContext("2d");
+
+  function resizeWave(){
+    var rect = els.wave.getBoundingClientRect();
+    var dpr = window.devicePixelRatio || 1;
+    els.wave.width = Math.max(1, Math.round(rect.width * dpr));
+    els.wave.height = Math.max(1, Math.round(rect.height * dpr));
+    drawWave();
+  }
+  window.addEventListener("resize", resizeWave);
+
+  function drawWave(){
+    var w = els.wave.width, h = els.wave.height;
+    waveCtx.clearRect(0, 0, w, h);
+    if (!waveSamples || !waveSamples.length) return;
+
+    var dur = els.audio.duration || 0;
+    var progress = dur ? (els.audio.currentTime / dur) : 0;
+    var progressX = progress * w;
+
+    var n = waveSamples.length;
+    var barW = w / n;
+    var gap = barW > 3 ? 1 : 0;
+    var max = 0;
+    for (var i=0;i<n;i++) if (waveSamples[i] > max) max = waveSamples[i];
+    if (!max) max = 1;
+
+    for (i=0;i<n;i++){
+      var amp = waveSamples[i] / max;
+      var barH = Math.max(2, amp * h * 0.92);
+      var x = i * barW;
+      var y = (h - barH) / 2;
+      waveCtx.fillStyle = (x <= progressX) ? "#ff5500" : "rgba(255,255,255,0.22)";
+      waveCtx.fillRect(x, y, Math.max(1, barW - gap), barH);
+    }
+
+    if (dur){
+      var cue = getCue();
+      if (cue !== undefined){
+        var cx = (cue / dur) * w;
+        waveCtx.fillStyle = "#3ecf8e";
+        waveCtx.fillRect(cx, 0, 2, h);
+        waveCtx.font = (11 * (window.devicePixelRatio||1)) + "px sans-serif";
+        waveCtx.fillText("CUE", cx + 3, 12 * (window.devicePixelRatio||1));
+      }
+    }
+  }
+
+  function seekFromEvent(e){
+    var rect = els.wave.getBoundingClientRect();
+    var clientX = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
+    var ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    return ratio;
+  }
+  els.wave.addEventListener("pointerdown", function(e){
+    if (!els.audio.duration) return;
+    waveDragging = true;
+    els.wave.setPointerCapture(e.pointerId);
+    var ratio = seekFromEvent(e);
+    els.audio.currentTime = ratio * els.audio.duration;
+    els.curTime.textContent = fmt(els.audio.currentTime);
+    drawWave();
+  });
+  els.wave.addEventListener("pointermove", function(e){
+    if (!waveDragging || !els.audio.duration) return;
+    var ratio = seekFromEvent(e);
+    els.audio.currentTime = ratio * els.audio.duration;
+    els.curTime.textContent = fmt(els.audio.currentTime);
+    drawWave();
+  });
+  els.wave.addEventListener("pointerup", function(){ waveDragging = false; });
+  els.wave.addEventListener("pointercancel", function(){ waveDragging = false; });
+
+  function waveLoop(){
+    drawWave();
+    if (!els.audio.paused) rafId = requestAnimationFrame(waveLoop);
+  }
+  els.audio.addEventListener("play", function(){
+    cancelAnimationFrame(rafId);
+    rafId = requestAnimationFrame(waveLoop);
+  });
+  els.audio.addEventListener("pause", drawWave);
+  els.audio.addEventListener("seeked", drawWave);
+
+  // ---- Loading a track ----
+  // All api-v2.soundcloud.com calls go through a proxy (server.js locally, worker.js
+  // when deployed) because that API only sends CORS headers for origin
+  // https://soundcloud.com — a page served from anywhere else gets its fetch blocked.
+  function proxyFetch(path, params){
+    var qs = Object.keys(params).map(function(k){ return k + "=" + encodeURIComponent(params[k]); }).join("&");
+    return fetch(apiBase + path + "?" + qs).then(function(r){
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    });
+  }
+
+  function loadTrack(url){
+    setStatus("Загрузка...", "");
+    els.loadBtn.disabled = true;
+    proxyFetch("/api/resolve", { url: url, client_id: clientId })
+      .then(function(track){
+        if (track.kind !== "track"){
+          throw new Error("Ссылка не ведёт на трек (плейлисты пока не поддерживаются)");
+        }
+        var transcodings = (track.media && track.media.transcodings) || [];
+        var t = transcodings.find(function(x){ return x.format && x.format.protocol === "progressive"; })
+             || transcodings.find(function(x){ return x.format && x.format.protocol === "hls"; });
+        if (!t) throw new Error("У трека нет доступного потока (защищён правообладателем)");
+
+        var streamPromise = proxyFetch("/api/media", { url: t.url, client_id: clientId });
+
+        var wavePromise = track.waveform_url
+          ? fetch(track.waveform_url).then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; })
+          : Promise.resolve(null);
+
+        return Promise.all([streamPromise, wavePromise]).then(function(results){
+          return { track: track, streamUrl: results[0].url, waveform: results[1] };
+        });
+      })
+      .then(function(res){
+        currentTrackKey = String(res.track.id);
+        els.title.textContent = res.track.title || "—";
+        els.artist.textContent = (res.track.user && res.track.user.username) || "—";
+        els.art.src = (res.track.artwork_url || (res.track.user && res.track.user.avatar_url) || "").replace("-large", "-t200x200");
+        els.audio.src = res.streamUrl;
+        els.audio.load();
+        els.player.style.display = "flex";
+        waveSamples = (res.waveform && res.waveform.samples) || null;
+        resizeWave();
+        drawWave();
+        setStatus("Готово: " + res.track.title, "ok");
+        els.audio.play().catch(function(){});
+      })
+      .catch(function(err){
+        setStatus("Ошибка: " + err.message, "err");
+      })
+      .finally(function(){
+        els.loadBtn.disabled = false;
+      });
+  }
+
+  els.loadBtn.addEventListener("click", function(){
+    var v = els.url.value.trim();
+    if (v) loadTrack(v);
+  });
+  els.url.addEventListener("keydown", function(e){
+    if (e.key === "Enter") els.loadBtn.click();
+  });
+
+  els.url.value = DEFAULT_TRACK_URL;
+  loadTrack(DEFAULT_TRACK_URL);
+})();
+</script>
+</body>
+</html>
