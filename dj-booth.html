@@ -1,0 +1,1494 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DJ Booth</title>
+<style>
+  :root{
+    /* deck theme */
+    --bg:#111318; --panel:#1a1d24; --panel2:#20242c; --text:#eef0f4; --muted:#8b93a3;
+    --accent:#ff5500; --accent2:#ff7a33; --border:#2a2f39; --good:#3ecf8e; --bad:#ff5d5d;
+    /* mixer theme (Xone:92-inspired brushed aluminum), unrelated var names on purpose */
+    --metal-hi:#eef0f1; --metal:#cacccf; --metal-mid:#aeb0b3; --metal-low:#94969a;
+    --mx-black:#0d0d0e; --mx-black2:#1c1d1f; --mx-ink-muted:#61656b;
+    --mx-groove:#141416; --led-green:#3ecf6e; --led-yellow:#e8c93e; --led-red:#ff4d4d;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  body{
+    margin:0; background:#0a0b0d; color:var(--text);
+    font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    display:flex; justify-content:center; user-select:none;
+  }
+  /* One layout for phone and desktop: a fixed, mobile-width portrait column,
+     centered on wider screens rather than stretched into a "desktop" layout.
+     No forced viewport-height/flex-grow here on purpose — that previously let
+     the decks get squeezed shorter than their own content needed, which spilled
+     out and overlapped the mixer below. Natural content height + page scroll instead. */
+  .booth{
+    position:relative; width:100%; max-width:480px;
+    display:flex; flex-direction:column; gap:6px; padding:22px 6px 6px;
+  }
+
+  .gear-btn{
+    position:absolute; top:4px; right:4px; z-index:2;
+    background:transparent; border:none; color:var(--muted); opacity:.45; font-size:13px; padding:4px 6px;
+  }
+  .gear-btn:hover{opacity:1;}
+
+  /* Setting an explicit `display` here overrides the browser's own [hidden]
+     UA rule (same specificity, author style wins) — without this line the
+     panel stays visible regardless of the `hidden` attribute/property. */
+  .settings-panel[hidden]{display:none;}
+  .settings-panel{background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px; display:flex; flex-direction:column; gap:8px;}
+  .settings-panel label{font-size:11px; color:var(--muted); display:flex; flex-direction:column; gap:4px;}
+  .settings-panel input{background:var(--panel2); border:1px solid var(--border); color:var(--text); padding:7px 9px; border-radius:6px; font-size:12px;}
+  .settings-panel .save{align-self:flex-end; padding:6px 14px; font-size:12px;}
+  .settings-note{font-size:10px; color:var(--muted); line-height:1.4;}
+
+  button{background:var(--accent); color:#fff; border:none; border-radius:8px; font-weight:600; cursor:pointer;}
+
+  /* ---------------- Decks ---------------- */
+  .decks-row{display:flex; gap:6px;}
+  .deck{
+    flex:1; min-width:0; background:var(--panel); border:1px solid var(--border); border-radius:10px;
+    padding:8px; display:flex; flex-direction:column; gap:6px;
+  }
+  .d-toprow{display:flex; align-items:center; gap:6px;}
+  .d-linkbtn{
+    flex:none; width:26px; height:26px; padding:0; font-size:12px; border-radius:6px;
+    background:var(--panel2); border:1px solid var(--border); color:var(--muted);
+  }
+  .d-title{
+    flex:1; min-width:0; font-size:11px; color:var(--muted); white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis;
+  }
+  .d-title.ok{color:var(--accent);}
+  .d-title.err{color:var(--bad);}
+
+  /* Load popover — a real overlay, not an inline row: the URL and its load
+     button stay off-screen until the 🔗 button opens this, keeping the deck's
+     default view down to just that one small button + the title. Uses a
+     .open class rather than [hidden] to toggle visibility (an element with
+     an explicit `display` in author CSS silently defeats [hidden] otherwise). */
+  .d-modal-backdrop{
+    display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:50;
+    align-items:center; justify-content:center; padding:24px;
+  }
+  .d-modal-backdrop.open{display:flex;}
+  .d-modal{
+    background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:12px;
+    display:flex; flex-direction:column; gap:8px; width:min(90vw, 320px);
+  }
+  .d-modal-label{font-size:10px; letter-spacing:.5px; color:var(--muted); text-transform:uppercase;}
+  .d-modal-row{display:flex; gap:5px;}
+  .d-modal input{
+    flex:1; min-width:0; background:var(--panel2); border:1px solid var(--border); color:var(--text);
+    padding:8px 9px; border-radius:6px; font-size:12px; outline:none;
+  }
+  .d-modal input:focus{border-color:var(--accent);}
+  .d-modal .d-load{padding:0 14px; font-size:14px; font-weight:400; border-radius:6px;}
+  .d-modal-close{align-self:flex-end; background:transparent; border:none; color:var(--muted); font-size:13px; padding:2px 4px;}
+
+  .d-wave-wrap{position:relative; border-radius:6px; overflow:hidden; background:var(--panel2); border:1px solid var(--border); flex:none;}
+  .d-wave{display:block; width:100%; height:16px; cursor:pointer; touch-action:none;}
+  .d-times{display:flex; justify-content:space-between; font-size:10px; color:var(--muted); font-variant-numeric:tabular-nums;}
+  /* Last 20s of the track: the remaining-time readout blinks as a warning. */
+  @keyframes durBlink{ 0%,49.9%{opacity:1;} 50%,100%{opacity:0;} }
+  .d-dur.blink-warn{ color:var(--bad); animation:durBlink 1s linear infinite; }
+
+  /* Pitch fader sits beside the zoom waveform, not above/below it — deck A
+     has it on the left (outer edge), deck B on the right (outer edge), via
+     DOM order (mirror flag), matching a twin-CDJ layout with faders flanking out. */
+  .d-midrow{display:flex; gap:16px; align-items:flex-start;}
+  .d-zoomcol{flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:6px;}
+  /* Height matched so the zoomcol (zoom-wrap + jogrow) bottoms out level
+     with the PLAY button in the speedbox column beside it. */
+  .d-zoom-wrap{
+    position:relative; height:275px; border-radius:8px; overflow:hidden;
+    background:var(--panel2); border:1px solid var(--border);
+  }
+  .d-zoom{display:block; width:100%; height:100%; cursor:ns-resize; touch-action:none;}
+
+  /* Jog nudge — bends playback rate up/down smoothly while held, back to the
+     set tempo on release. Sits right under the zoom waveform it affects.
+     space-between (not center) + zoomcol's default align-items:stretch means
+     the row is exactly as wide as the zoom-wave above it, so the buttons
+     land flush with its left/right edges, "JOG" filling the middle gap. */
+  .d-jogrow{display:flex; gap:6px; justify-content:space-between; align-items:center;}
+  .d-jogrow .d-joglabel{font-size:9px; letter-spacing:1px; color:var(--muted);}
+  .d-jog{
+    flex:none; width:42px; height:22px; padding:0; border-radius:6px;
+    background:var(--panel2); border:1px solid var(--border); color:var(--text);
+    display:flex; align-items:center; justify-content:center; gap:3px;
+  }
+  .d-jog:active{background:var(--accent); color:#fff;}
+  /* Open chevrons (">>" / "<<"), not filled triangles — drawn with borders,
+     not glyphs, so they stay crisp and inherit the button's color/state. */
+  .d-chev{width:7px; height:7px; border:0 solid currentColor;}
+  .d-chev-l{border-top-width:2px; border-left-width:2px; transform:rotate(-45deg);}
+  .d-chev-r{border-top-width:2px; border-right-width:2px; transform:rotate(45deg);}
+
+  .d-transport{display:flex; flex-direction:column; align-items:center; gap:8px;}
+  /* Pioneer-CDJ-style concentric ring bezel: flat gray circle (center) ->
+     flat brand-color ring (CUE orange / PLAY green) -> flat light-gray
+     outer circle (same overall radius the plain button used to be) — just
+     circle-in-circle-in-circle, no gradients/shading trying to fake depth.
+     The ring stays lit at all times (like a powered CDJ button); only the
+     inner face color changes to show the active state (armed / playing). */
+  .deck-btn{
+    width:49px; height:49px; border-radius:50%; padding:0; font-size:10px; font-weight:700;
+    letter-spacing:.5px; display:flex; align-items:center; justify-content:center;
+    border:none; flex:none; color:#20242a;
+    box-shadow:0 2px 4px rgba(0,0,0,.5);
+  }
+  .deck-btn.cue{
+    background:radial-gradient(circle,
+      #9a9c9f 0%, #9a9c9f 59%,
+      var(--accent) 59%, var(--accent) 88%,
+      var(--metal) 88%, var(--metal) 100%);
+  }
+  /* CUE also lights up while the deck is playing, and blinks in sync with
+     PLAY during the stutter cue (JS toggles these same two classes on both
+     buttons together). */
+  .deck-btn.cue.is-armed, .deck-btn.cue.is-playing, .deck-btn.cue.stutter-blink{
+    background:radial-gradient(circle,
+      var(--accent) 0%, var(--accent) 59%,
+      var(--accent) 59%, var(--accent) 88%,
+      var(--metal) 88%, var(--metal) 100%);
+    color:#2a1200;
+  }
+  .deck-btn.play{
+    background:radial-gradient(circle,
+      #9a9c9f 0%, #9a9c9f 59%,
+      var(--good) 59%, var(--good) 88%,
+      var(--metal) 88%, var(--metal) 100%);
+  }
+  /* Blinks in time with the stutter cue's on/off cycle while paused-with-jerks. */
+  .deck-btn.play.is-playing, .deck-btn.play.stutter-blink{
+    background:radial-gradient(circle,
+      var(--good) 0%, var(--good) 59%,
+      var(--good) 59%, var(--good) 88%,
+      var(--metal) 88%, var(--metal) 100%);
+    color:#06251a;
+  }
+  .deck-btn:active{transform:scale(0.94);}
+
+  /* Pulled outward past the deck's own padding edge (negative margin on the
+     outer side only) so the whole tempo/CUE/PLAY column sits closer to the
+     deck's edge — paired with the wider .d-midrow gap above, which gives the
+     zoom waveform correspondingly more breathing room on its side. */
+  .speedbox{flex:none; display:flex; flex-direction:column; align-items:center; gap:14px;}
+  .speedbox:not(.mirror){ margin-left:-6px; }
+  .speedbox.mirror{ margin-right:-6px; }
+  /* Fixed width sized for the widest possible reading (WIDE ±100% range,
+     e.g. "-100.0%") so the tempo readout never reflows the layout as it changes. */
+  .speedval{font-size:11px; font-weight:400; font-variant-numeric:tabular-nums; min-width:80px; text-align:center;}
+  /* Track's own box only — no flex-row with the reset button anymore, so
+     the track's center always lands on the same vertical line as CUE/PLAY/
+     the tempo readout, regardless of the reset button's placement. The
+     reset button is absolutely positioned off to whichever side faces the
+     zoom waveform (inner side, not the deck's outer edge), pointing back
+     into the track. */
+  /* Extra margin-top clears room for the range button (20px + 4px gap)
+     sitting above this box without it overlapping the tempo readout above —
+     the flex gap from .speedbox alone (14px) isn't enough on its own. */
+  .pitch-wrap{position:relative; margin-top:10px;}
+  .pitch-track{position:relative; width:38px; height:142px;}
+  .pitch-track::before{
+    content:""; position:absolute; left:50%; top:6px; bottom:6px; width:4px;
+    transform:translateX(-50%); background:var(--bg); border:1px solid var(--border); border-radius:2px;
+  }
+  .pitch-track::after{
+    content:""; position:absolute; left:50%; top:50%; width:16px; height:2px;
+    transform:translate(-50%,-50%); background:var(--muted); pointer-events:none;
+  }
+  .pitch-track input[type=range]{
+    position:absolute; top:50%; left:50%; width:142px; height:38px; z-index:1;
+    transform:translate(-50%,-50%) rotate(90deg);
+    -webkit-appearance:none; appearance:none; background:transparent; margin:0; touch-action:none;
+  }
+  /* Same cap look as the mixer's channel faders (dark gradient + parallel
+     white stripe), but resized: the mixer cap's thin side (15px, along its
+     own travel axis) scaled 2x to 30px (1.4x wasn't enough), and its wide
+     side (35px, across the groove) scaled down 10% to 31.5px. */
+  .pitch-track input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; width:30px; height:31.5px; border-radius:2px;
+    background:linear-gradient(90deg,
+      #3a3a3e 0%, #3a3a3e calc(50% - 1px),
+      #eef0f2 calc(50% - 1px), #eef0f2 calc(50% + 1px),
+      #161618 calc(50% + 1px), #161618 100%);
+    border:1px solid #000; box-shadow:0 1px 2px rgba(0,0,0,.6); cursor:pointer;
+  }
+  .pitch-track input[type=range]::-moz-range-thumb{
+    width:30px; height:31.5px; border-radius:2px; border:1px solid #000;
+    background:linear-gradient(90deg,
+      #3a3a3e 0%, #3a3a3e calc(50% - 1px),
+      #eef0f2 calc(50% - 1px), #eef0f2 calc(50% + 1px),
+      #161618 calc(50% + 1px), #161618 100%);
+    box-shadow:0 1px 2px rgba(0,0,0,.6); cursor:pointer;
+  }
+  /* Gray frame around the fader's whole working area (its full travel
+     length), not around the moving cap — width matches the cap's own
+     visible width (31.5px) + 1px gap each side, height spans the track's
+     full travel (132px) + 1px gap top/bottom. pitch-wrap's own box already
+     equals pitch-track's (38x132), so centering here lines up with it. */
+  .pitch-wrap::before{
+    content:''; position:absolute; left:50%; top:50%;
+    width:33.5px; height:144px; transform:translate(-50%,-50%);
+    border:1px solid var(--muted); border-radius:2px; pointer-events:none;
+  }
+  /* Tempo reset — a small circular button (same style/size as the mixer's
+     CUT buttons) pinned to the vertical center of the fader (next to its 0%
+     notch), on whichever side of the track faces the zoom waveform (inner
+     side, not the deck's outer edge) — absolutely positioned so it never
+     affects .pitch-wrap's own box/centering. */
+  .d-speedreset{
+    position:absolute; top:50%; transform:translateY(-50%);
+    width:20px; height:20px; border-radius:50%; padding:0; line-height:1;
+    display:flex; align-items:center; justify-content:center; font-size:9px;
+    background:var(--panel2); border:1px solid var(--border); color:var(--text);
+  }
+  .pitch-wrap.side-right .d-speedreset{ left:100%; margin-left:1px; }
+  .pitch-wrap.side-left .d-speedreset{ right:100%; margin-right:1px; }
+  /* Fixed size regardless of the displayed value ("±6%" vs "±100%") — text
+     length used to change the button's own footprint since it was sized by
+     its padding+content. Sits directly above the pitch-track, centered on
+     the same vertical line as CUE/PLAY/the tempo readout below — not offset
+     to either side like the reset button. */
+  .d-rangebtn{
+    position:absolute; bottom:100%; left:50%; margin-bottom:4px;
+    transform:translateX(-50%);
+    width:20px; height:20px; padding:0; font-size:7px; line-height:1;
+    background:var(--panel2); color:var(--text); border:1px solid var(--border);
+    border-radius:50%; display:flex; align-items:center; justify-content:center;
+  }
+
+  input[type=range]{-webkit-appearance:none; height:4px; background:var(--border); border-radius:2px; outline:none;}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:14px; height:14px; border-radius:50%; background:var(--accent); cursor:pointer;}
+  input[type=range]::-moz-range-thumb{width:14px; height:14px; border-radius:50%; background:var(--accent); border:none; cursor:pointer;}
+
+  /* ---------------- Mixer (Xone:92-inspired) ---------------- */
+  .mixer-panel{flex:none;}
+  .mixer{
+    background:linear-gradient(180deg,var(--metal-hi) 0%, var(--metal) 45%, var(--metal-low) 100%);
+    border:1px solid var(--mx-black); border-radius:2px;
+    box-shadow:0 10px 24px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.5);
+    padding:8px 8px 16px; width:100%; max-width:480px; margin:0 auto; overflow:hidden;
+  }
+  /* CSS Grid instead of nested flex boxes — needed to make the crossfader's
+     width an exact function of the fader columns' positions (grid-column
+     span), rather than a guessed percentage, and to make EQ/fader/meters
+     share one literal top edge (row 1, align-items:start) instead of
+     faking it with matching fixed heights. Columns, in order:
+     EQ1 | Fader1 | Master+meters | Fader2 | EQ2 — full mixer width, generous
+     gap between every column (not squeezed together).
+     justify-content:space-between (not center!) is load-bearing: `center`
+     centers the whole 5-column block as one unit regardless of each
+     column's own width, which silently defeated every attempt at matching
+     EQ1/EQ2's position to the deck's CUE/PLAY column above — the block just
+     re-centered itself. space-between pins column 1 flush to the grid's own
+     left edge and column 5 flush to its right edge (extra space distributed
+     between the tracks instead), which is what actually lines them up with
+     the deck's flex-start/flex-end-anchored CUE/PLAY column. */
+  .mx-grid{
+    display:grid; grid-template-columns:auto auto auto auto auto;
+    column-gap:30px; row-gap:14px; justify-content:space-between; align-items:start;
+  }
+  /* EQ columns get a min-width matching the deck's CUE/PLAY column (56px,
+     the width of those circular buttons) so that — since both are centered
+     content within a column of the same width, starting from the same
+     horizontal padding — their centers line up with the CUE/PLAY buttons
+     directly above them in the deck panel. */
+  /* No extra push-out margin on the fader columns anymore — the crossfader
+     is confined inside the center column now (see below), so it can't
+     overlap the faders regardless of how close they sit; the base
+     column-gap alone (symmetric on both sides) is enough. */
+  /* Nudged inward (transform, not margin/gap) to shrink just the EQ<->fader
+     spacing — a pure visual shift that doesn't touch grid track sizing or
+     any other gap (fader<->center stays exactly as it was). Trades a
+     little distance from the mixer's own edge for tighter EQ/fader spacing,
+     per explicit instruction. */
+  .mx-gc1{grid-column:1; min-width:49px; transform:translateX(6px);} .mx-gc2{grid-column:2;} .mx-gc3{grid-column:3;}
+  .mx-gc4{grid-column:4;} .mx-gc5{grid-column:5; min-width:49px; transform:translateX(-6px);}
+
+  /* Crossfader now lives inside the center column, below the meters — sits
+     between the faders (not spanning the whole bottom) and only as tall as
+     it needs to be, with the meters shortened to make room above it so the
+     whole column (Master + meters + crossfader) still bottoms out level
+     with the faders. */
+  /* Mixer height trimmed ~12% (324px -> 285px per column) by squeezing the
+     gap between stacked knob/fader elements (16px -> 3px) and shortening the
+     fader track itself accordingly — knob/button sizes untouched. All three
+     column families (EQ, fader, center) still bottom out level: EQ column
+     4*69 + 3*3 = 285; fader column 69 + 3 + 213 = 285; center column
+     69 + 3 + 156(meter, shrunk to absorb the rest) + 3 + 54(xfrow) = 285. */
+  .mx-center-col{display:flex; flex-direction:column; align-items:center; gap:3px; flex:none;}
+  .mx-col{display:flex; flex-direction:column; gap:3px; align-items:center; flex-shrink:0;}
+  /* Outer meters (A/B) spread to the same width as the crossfader below
+     them (120px), master meter stays centered between them. */
+  .mx-metersrow{display:flex; justify-content:space-between; width:120px; align-items:flex-start; flex-shrink:0;}
+
+  /* Knobs scaled 1.3x then +12% more (30px->39px->44px, small 20px->26px->29px)
+     — knobgrp height scaled to match (48px->62px->69px). */
+  .mx-knobgrp{height:69px; flex-shrink:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;}
+  .mx-knoblabel{font-size:8px; letter-spacing:.5px; color:var(--mx-ink-muted); text-transform:uppercase; font-weight:600;}
+  .mx-knob{
+    flex-shrink:0; width:44px; height:44px; border-radius:50%; position:relative; cursor:ns-resize;
+    background:radial-gradient(circle at 35% 30%, #4a4a50, #1c1c1f 70%);
+    border:1px solid #000; box-shadow:0 2px 3px rgba(0,0,0,.5), inset 0 0 0 1px rgba(255,255,255,.06);
+    touch-action:none;
+  }
+  .mx-knob.small{width:29px; height:29px;}
+  .mx-knob::after{
+    content:''; position:absolute; left:50%; top:5px; width:3px; height:16px;
+    background:#eef0f2; transform-origin:50% 17.5px;
+    transform:translateX(-50%) rotate(var(--deg,0deg)); border-radius:1px;
+  }
+  .mx-knob.small::after{ top:3px; height:10px; transform-origin:50% 10px; }
+
+  /* "Equalizer" = High+Mid+Low only (Trim is a separate, non-EQ control) —
+     3 knobgrps (69px, scaled) + 2 gaps (3px, from .mx-col) = 213px. Trim
+     and Master both sit in their own 69px top tier (Trim: first item of the
+     EQ column; Master: only item before the meters) — the fader starts
+     below that same 69px+3px gap tier, so fader top = High's top (not
+     Trim's). Meters are shorter than the fader on purpose — Master(69)+gap+
+     meters+gap+crossfader-block adds up to the same 285px total, so the
+     crossfader sits nested between the meters and the fader's own bottom
+     instead of spanning the full width below everything. */
+  .mx-topspacer{
+    height:69px; flex-shrink:0; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:2px;
+  }
+  /* Momentary channel-kill: held down = fader (and audio) drop to zero,
+     released = fader snaps back to wherever it was. */
+  .mx-topbtn{
+    flex-shrink:0; width:20px; height:20px; padding:0; font-size:9px; line-height:1;
+    border-radius:50%; background:var(--mx-black2); border:1px solid #000; color:var(--metal-mid);
+    display:flex; align-items:center; justify-content:center; touch-action:none;
+  }
+  .mx-topbtn.active{background:var(--accent); color:#fff;}
+  .mx-tri{display:inline-block; transform:translateY(1px);}
+  .mx-meter{
+    flex-shrink:0; display:flex; flex-direction:column-reverse; gap:2px; height:148px; width:8px;
+    background:var(--mx-groove); border-radius:2px; padding:3px 0; border:1px solid #000;
+  }
+  .mx-meter .mx-seg{flex:1; border-radius:1px; background:#101012;}
+  .mx-meter .mx-seg.on-g{background:var(--led-green);}
+  .mx-meter .mx-seg.on-y{background:var(--led-yellow);}
+  .mx-meter .mx-seg.on-r{background:var(--led-red);}
+
+  .mx-fader-track{flex-shrink:0; width:28px; height:213px; position:relative;}
+  .mx-fader-track input[type=range]{
+    position:absolute; top:50%; left:50%; width:213px; height:28px;
+    transform:translate(-50%,-50%) rotate(-90deg); -webkit-appearance:none; appearance:none;
+    background:transparent; margin:0; touch-action:none;
+  }
+  .mx-fader-track::before{
+    content:''; position:absolute; left:50%; top:5px; bottom:5px; width:4px; transform:translateX(-50%);
+    background:repeating-linear-gradient(#141416,#141416 1px, transparent 1px, transparent 7px), var(--mx-groove);
+    border-radius:2px; border:1px solid #000;
+  }
+  .mx-fader-track input[type=range]::-webkit-slider-runnable-track{background:transparent;}
+  /* Shared cap look for both faders: dark gradient with a thin white stripe
+     down the middle, running PARALLEL to the cap's long side (same white as
+     the knob-pointer indicator). A 90deg gradient varies across the
+     *pre-rotation* width and is constant along its height — for the
+     (rotated) channel fader, pre-rotation height becomes the visual long
+     side after rotate(-90deg), so the stripe spans that long side fully,
+     centered on the short side; for the (unrotated) crossfader the same
+     90deg direction does the equivalent directly against its own real
+     width/height — same rule, same result on both. */
+  .mx-fader-track input[type=range]::-webkit-slider-thumb,
+  .mx-xftrack input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; border-radius:2px;
+    background:linear-gradient(90deg,
+      #3a3a3e 0%, #3a3a3e calc(50% - 1px),
+      #eef0f2 calc(50% - 1px), #eef0f2 calc(50% + 1px),
+      #161618 calc(50% + 1px), #161618 100%);
+    border:1px solid #000; box-shadow:0 1px 2px rgba(0,0,0,.6); position:relative;
+  }
+  /* The track itself is a horizontal <input> rotated -90deg to read as
+     vertical. A thumb's CSS width runs along the input's own (pre-rotation)
+     travel axis, so to get a real fader-cap look — wide across the groove,
+     short along the travel direction, i.e. perpendicular to motion — width
+     and height here need to be swapped relative to what they'd be for an
+     unrotated horizontal slider. */
+  .mx-fader-track input[type=range]::-webkit-slider-thumb{width:15px; height:35px;}
+  .mx-fader-track input[type=range]::-moz-range-thumb{
+    width:15px; height:35px; border-radius:2px; border:1px solid #000;
+    background:linear-gradient(90deg,
+      #3a3a3e 0%, #3a3a3e calc(50% - 1px),
+      #eef0f2 calc(50% - 1px), #eef0f2 calc(50% + 1px),
+      #161618 calc(50% + 1px), #161618 100%);
+    box-shadow:0 1px 2px rgba(0,0,0,.6);
+  }
+  .mx-fader-track input[type=range]::-moz-range-track{background:transparent;}
+
+  /* Nested in the center column now, below the meters — its width is its
+     own (not tied to the fader columns), narrow enough to sit clearly
+     between them rather than spanning toward either one. margin-top gives
+     it breathing room away from the meters above and nudges it down a
+     little further still — the center column now runs slightly past the
+     EQ/fader columns' bottom edge rather than lining up flush with them,
+     traded deliberately for the crossfader's own position. */
+  .mx-xfrow{display:flex; flex-direction:column; align-items:center; gap:4px; margin-top:16px;}
+  .mx-xftrack{position:relative; width:122px; height:38px;}
+  .mx-xftrack input[type=range]{
+    width:100%; height:38px; -webkit-appearance:none; appearance:none; background:transparent; margin:0; touch-action:none;
+  }
+  .mx-xftrack::before{
+    content:''; position:absolute; left:6px; right:6px; top:50%; height:4px; transform:translateY(-50%);
+    background:repeating-linear-gradient(90deg,#141416,#141416 1px, transparent 1px, transparent 8px), var(--mx-groove);
+    border-radius:2px; border:1px solid #000;
+  }
+  /* Exact same cap as the channel fader (15x35), just not itself rotated —
+     since this track is naturally horizontal, no width/height swap needed:
+     15px along its own horizontal travel, 35px across it. */
+  .mx-xftrack input[type=range]::-webkit-slider-thumb{width:15px; height:35px;}
+  .mx-xftrack input[type=range]::-moz-range-thumb{
+    width:15px; height:35px; border-radius:2px; border:1px solid #000;
+    background:linear-gradient(90deg,
+      #3a3a3e 0%, #3a3a3e calc(50% - 1px),
+      #eef0f2 calc(50% - 1px), #eef0f2 calc(50% + 1px),
+      #161618 calc(50% + 1px), #161618 100%);
+  }
+  .mx-xflabels{display:flex; justify-content:space-between; width:122px; font-size:9px; color:var(--mx-ink-muted); font-weight:700;}
+</style>
+</head>
+<body>
+<div class="booth">
+
+  <button class="gear-btn" id="settingsBtn">⚙</button>
+
+  <div class="settings-panel" id="settingsPanel" hidden>
+    <label>SoundCloud client_id
+      <input type="text" id="cidInput" placeholder="новый client_id">
+    </label>
+    <label>Адрес API-прокси (пусто = тот же адрес, с которого открыта страница)
+      <input type="text" id="apiBaseInput" placeholder="https://sc-proxy.your-name.workers.dev">
+    </label>
+    <button class="save" id="settingsSave">Сохранить</button>
+    <p class="settings-note">Общие для обеих дек. client_id обновляйте, если загрузка треков перестала работать (см. DevTools → Network на soundcloud.com).</p>
+  </div>
+
+  <div class="decks-row">
+    <div class="deck" id="deckA"></div>
+    <div class="deck" id="deckB"></div>
+  </div>
+
+  <div class="mixer-panel">
+    <div class="mixer">
+      <div class="mx-grid">
+        <div class="mx-col mx-gc1" id="eqColA"></div>
+        <div class="mx-col mx-gc2">
+          <div class="mx-topspacer"><div class="mx-knoblabel">Cut</div><button class="mx-topbtn"><span class="mx-tri">▼</span></button></div>
+          <div class="mx-fader-track" id="faderColA"></div>
+        </div>
+        <div class="mx-center-col mx-gc3">
+          <div class="mx-knobgrp">
+            <div class="mx-knoblabel">Master</div>
+            <div class="mx-knob" id="masterKnob"></div>
+          </div>
+          <div class="mx-metersrow">
+            <div class="mx-meter" id="meterA"></div>
+            <div class="mx-meter" id="masterMeter"></div>
+            <div class="mx-meter" id="meterB"></div>
+          </div>
+          <div class="mx-xfrow">
+            <div class="mx-xftrack">
+              <input type="range" id="crossfader" min="0" max="1" step="0.001" value="0.5">
+            </div>
+            <div class="mx-xflabels"><span>A</span><span>B</span></div>
+          </div>
+        </div>
+        <div class="mx-col mx-gc4">
+          <div class="mx-topspacer"><div class="mx-knoblabel">Cut</div><button class="mx-topbtn"><span class="mx-tri">▼</span></button></div>
+          <div class="mx-fader-track" id="faderColB"></div>
+        </div>
+        <div class="mx-col mx-gc5" id="eqColB"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+<script>
+(function(){
+  "use strict";
+
+  function clamp(v, lo, hi){ return Math.min(hi, Math.max(lo, v)); }
+  function fmt(t){
+    if (!isFinite(t) || t < 0) t = 0;
+    var m = Math.floor(t/60), s = Math.floor(t%60);
+    return m + ":" + (s<10?"0":"") + s;
+  }
+
+  // Single AudioContext for the whole page — both decks and the mixer graph
+  // must share one context, since Web Audio nodes can't be connected across
+  // contexts. Created immediately (starts "suspended" until a user gesture).
+  var audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  function resumeCtx(){ if (audioCtx.state === "suspended") audioCtx.resume(); }
+  document.addEventListener("pointerdown", resumeCtx);
+  document.addEventListener("keydown", resumeCtx);
+
+  // ---- Shared settings (client_id / API proxy base), used by both decks ----
+  var DEFAULT_CLIENT_ID = "Pb72ranhoyt6gw7hM7TkzUItXlMWSNSo";
+  var clientId = localStorage.getItem("sc_client_id") || DEFAULT_CLIENT_ID;
+  var apiBase = localStorage.getItem("sc_api_base") || "";
+
+  var settingsBtn = document.getElementById("settingsBtn");
+  var settingsPanel = document.getElementById("settingsPanel");
+  var cidInput = document.getElementById("cidInput");
+  var apiBaseInput = document.getElementById("apiBaseInput");
+  cidInput.value = clientId === DEFAULT_CLIENT_ID ? "" : clientId;
+  apiBaseInput.value = apiBase;
+
+  settingsBtn.addEventListener("click", function(){
+    settingsPanel.hidden = !settingsPanel.hidden;
+  });
+  document.getElementById("settingsSave").addEventListener("click", function(){
+    var cid = cidInput.value.trim();
+    if (cid){ clientId = cid; localStorage.setItem("sc_client_id", cid); }
+    var base = apiBaseInput.value.trim().replace(/\/+$/, "");
+    apiBase = base; localStorage.setItem("sc_api_base", base);
+    settingsPanel.hidden = true;
+  });
+
+  var DEFAULT_TRACK_URL = "https://soundcloud.com/hooletronica/ellectroniqa-greasy";
+
+  // =========================================================================
+  // Deck factory — one Pioneer-CDJ-style deck (Web Audio playback engine:
+  // real tempo, stutter cue on pause, overview + scrolling zoom waveform).
+  // Instantiated twice (deck A / deck B). Returns {output}, the deck's
+  // GainNode — the mixer connects from there instead of a speaker.
+  // =========================================================================
+  function deckMarkup(mirror){
+    // The reset button sits on the INNER side of the fader — the side facing
+    // the vertical zoom waveform, not the deck's outer edge — and always
+    // points back INTO the slider toward its 0 notch. Deck A (mirror=false)
+    // has the zoom waveform to its right, so the button lands on the track's
+    // right and points left; deck B is the mirror image.
+    var trackHtml = '<div class="pitch-track"><input type="range" class="d-speed" min="-16" max="16" step="0.1" value="0"></div>';
+    var resetSide = mirror ? 'side-left' : 'side-right';
+    var resetIcon = mirror ? '▶' : '◀';
+    var resetHtml = '<button class="d-speedreset">' + resetIcon + '</button>';
+    var rangeHtml = '<button class="d-rangebtn">16</button>';
+    // .pitch-wrap holds only the track's own box (position:absolute takes the
+    // reset button and range button out of flow) so the track's center
+    // always lands on the same vertical line as CUE/PLAY/the tempo readout
+    // above and below it, regardless of where those buttons sit. Both sit on
+    // the same side (resetSide) — range button above the track, reset button
+    // beside its middle — so they read as one vertical column.
+    var pitchWrap = '<div class="pitch-wrap ' + resetSide + '">' + rangeHtml + trackHtml + resetHtml + '</div>';
+    // CUE/PLAY live under the tempo fader (same column), not in their own
+    // full-width row — frees the zoom waveform to run the deck's full height.
+    var transportHtml = ''
+      + '<div class="d-transport">'
+      +   '<button class="deck-btn cue d-cue">CUE</button>'
+      +   '<button class="deck-btn play d-play">▶</button>'
+      + '</div>';
+    var speedboxHtml = ''
+      + '<div class="speedbox' + (mirror ? ' mirror' : '') + '">'
+      +   '<span class="speedval d-speedval">0.0%</span>'
+      +   pitchWrap
+      +   transportHtml
+      + '</div>';
+    // Jog nudge buttons sit right under the zoom waveform they bend.
+    var zoomColHtml = ''
+      + '<div class="d-zoomcol">'
+      +   '<div class="d-zoom-wrap"><canvas class="d-zoom"></canvas></div>'
+      +   '<div class="d-jogrow">'
+      +     '<button class="d-jog d-jogback"><span class="d-chev d-chev-l"></span><span class="d-chev d-chev-l"></span></button>'
+      +     '<span class="d-joglabel">JOG</span>'
+      +     '<button class="d-jog d-jogfwd"><span class="d-chev d-chev-r"></span><span class="d-chev d-chev-r"></span></button>'
+      +   '</div>'
+      + '</div>';
+    // Fader on the outer edge of each deck: deck A (left) gets it on its left,
+    // deck B (right) gets it on its right — achieved by DOM order, not CSS
+    // row-reverse (keeps drag/tab order matching visual order).
+    var midRow = '<div class="d-midrow">' + (mirror ? (zoomColHtml + speedboxHtml) : (speedboxHtml + zoomColHtml)) + '</div>';
+
+    return ''
+      + '<div class="d-toprow">'
+      +   '<button class="d-linkbtn">🔗</button>'
+      +   '<div class="d-title"></div>'
+      + '</div>'
+      + '<div class="d-modal-backdrop">'
+      +   '<div class="d-modal">'
+      +     '<button class="d-modal-close">✕</button>'
+      +     '<div class="d-modal-label">Paste SoundCloud URL</div>'
+      +     '<div class="d-modal-row">'
+      +       '<input type="url" class="d-url" placeholder="soundcloud.com/artist/track">'
+      +       '<button class="d-load">Upload</button>'
+      +     '</div>'
+      +   '</div>'
+      + '</div>'
+      + '<div class="d-wave-wrap"><canvas class="d-wave"></canvas></div>'
+      + '<div class="d-times"><span class="d-cur">0:00</span><span class="d-dur">-0:00</span></div>'
+      + midRow;
+  }
+
+  function createDeck(opts){
+    var root = opts.root;
+    root.innerHTML = deckMarkup(opts.mirror);
+    function $(sel){ return root.querySelector(sel); }
+
+    var els = {
+      linkBtn: $(".d-linkbtn"), modalBackdrop: $(".d-modal-backdrop"),
+      modalClose: $(".d-modal-close"),
+      url: $(".d-url"), loadBtn: $(".d-load"), title: $(".d-title"),
+      wave: $(".d-wave"), zoomWave: $(".d-zoom"),
+      curTime: $(".d-cur"), durTime: $(".d-dur"),
+      playBtn: $(".d-play"), cueBtn: $(".d-cue"),
+      speed: $(".d-speed"), speedVal: $(".d-speedval"),
+      rangeBtn: $(".d-rangebtn"), speedReset: $(".d-speedreset"),
+      jogBack: $(".d-jogback"), jogFwd: $(".d-jogfwd")
+    };
+
+    function openLoadModal(){
+      els.url.value = ""; // always start blank; closing with × never touches the loaded track
+      els.modalBackdrop.classList.add("open");
+      els.url.focus();
+    }
+    function closeLoadModal(){ els.modalBackdrop.classList.remove("open"); }
+    els.linkBtn.addEventListener("click", openLoadModal);
+    els.modalClose.addEventListener("click", closeLoadModal);
+    els.modalBackdrop.addEventListener("pointerdown", function(e){
+      if (e.target === els.modalBackdrop) closeLoadModal();
+    });
+
+    var gainNode = audioCtx.createGain();
+    gainNode.gain.value = 1; // this deck's output — the mixer connects onward from here
+
+    var sourceNode = null;
+    var sourceGainNode = null; // per-node fade envelope, see DECLICK below
+    var audioBuffer = null;
+    var currentTrackKey = null;
+    var waveSamples = null;
+    var waveDragging = false, zoomDragging = false;
+    var rafId = null;
+    var cuePreviewActive = false;
+
+    var state = "stopped"; // "stopped" | "playing" | "stuttering"
+    var pausedPosition = 0;
+    var startOffset = 0;
+    var startedAtCtxTime = 0;
+    var currentRate = 1;  // the *set* tempo (from the fader) — the rate to return to
+    var liveRate = 1;     // the rate actually sounding right now — differs from
+                           // currentRate only while a jog nudge is bending it
+    var rateRamp = null;  // {startCtxTime, startPos, fromRate, toRate, duration} — jog nudge in flight
+
+    // Pause always stutters (no vinyl brake mode) — a short chunk repeats at
+    // the pause point, then silence for an equal length, then repeats again.
+    var STUTTER_FRAME = 1 / 75;             // ~13.3ms, one CD frame
+    var STUTTER_CYCLE = STUTTER_FRAME * 18 / 1.4 * 1.15; // 18x slower than a bare loop, 1.4x faster, then 15% slower again
+    var STUTTER_CHUNK = STUTTER_CYCLE / 2;  // play half the cycle, silence for the other half
+    var CUE_EPS = 0.15;
+    var stutterTimer = null;
+    var stutterBlinkOffTimer = null;
+    var stutterPos = 0;
+
+    // Every grain gets a few ms of fade-in/out instead of a hard start/stop —
+    // scrubbing the zoom waveform while stuttering re-triggers a new grain on
+    // every pointermove, and cutting a buffer instantly at an arbitrary sample
+    // (not a zero-crossing) is exactly what produces an audible click/pop.
+    // Was 4ms — softened real transient attacks enough to make it much harder
+    // to find an exact hit by ear while scrubbing. This just needs to smooth
+    // the instantaneous sample-level jump a hard cut makes, not the sound itself.
+    var DECLICK = 0.0007; // seconds
+
+    // Always starts at 16% on both decks — not persisted across reloads, so
+    // a leftover localStorage value from earlier testing can't override it.
+    var PITCH_RANGES = [6, 10, 16, 100];
+    var pitchRangeIdx = PITCH_RANGES.indexOf(16);
+
+    function setStatus(msg, kind){
+      els.title.textContent = msg || "";
+      els.title.className = "d-title" + (kind ? " " + kind : "");
+    }
+
+    function applyPitchRange(){
+      var r = PITCH_RANGES[pitchRangeIdx];
+      els.speed.min = -r; els.speed.max = r;
+      els.rangeBtn.textContent = String(r);
+      var cur = parseFloat(els.speed.value);
+      var c = clamp(cur, -r, r);
+      if (c !== cur){ els.speed.value = c; setTempo(c); }
+    }
+    els.rangeBtn.addEventListener("click", function(){
+      pitchRangeIdx = (pitchRangeIdx + 1) % PITCH_RANGES.length;
+      applyPitchRange();
+    });
+
+    function engineDuration(){ return audioBuffer ? audioBuffer.duration : 0; }
+
+    function stopNode(){
+      if (stutterTimer){ clearTimeout(stutterTimer); stutterTimer = null; }
+      if (stutterBlinkOffTimer){ clearTimeout(stutterBlinkOffTimer); stutterBlinkOffTimer = null; }
+      els.playBtn.classList.remove("stutter-blink");
+      els.cueBtn.classList.remove("stutter-blink");
+      if (sourceNode){
+        var node = sourceNode, g = sourceGainNode;
+        node.onended = null;
+        var now = audioCtx.currentTime;
+        try {
+          if (g){
+            g.gain.cancelScheduledValues(now);
+            g.gain.setValueAtTime(g.gain.value, now);
+            g.gain.linearRampToValueAtTime(0, now + DECLICK);
+          }
+          node.stop(now + DECLICK);
+        } catch(e){ try { node.stop(); } catch(e2){} }
+        setTimeout(function(){
+          try { node.disconnect(); } catch(e){}
+          if (g) try { g.disconnect(); } catch(e){}
+        }, DECLICK * 1000 + 30);
+        sourceNode = null;
+        sourceGainNode = null;
+      }
+    }
+
+    // Position while a jog nudge is ramping the rate: the rate is changing
+    // continuously (not stepped), so plain elapsed*rate would drift from the
+    // truth — this integrates a uniformly-changing rate exactly (same shape
+    // as the old vinyl-brake math), which is the whole point: the waveform
+    // must track the real, currently-bent playback rate, not the set tempo.
+    function positionAtRateRamp(r, elapsed){
+      var t = clamp(elapsed, 0, r.duration);
+      var accel = (r.toRate - r.fromRate) / r.duration;
+      return r.startPos + r.fromRate * t + 0.5 * accel * t * t;
+    }
+    function instantRateAtRamp(r, elapsed){
+      var t = clamp(elapsed, 0, r.duration);
+      return r.fromRate + (r.toRate - r.fromRate) * (t / r.duration);
+    }
+
+    function getPosition(){
+      if (!audioBuffer) return 0;
+      if (state === "playing"){
+        if (rateRamp) return clamp(positionAtRateRamp(rateRamp, audioCtx.currentTime - rateRamp.startCtxTime), 0, engineDuration());
+        return clamp(startOffset + (audioCtx.currentTime - startedAtCtxTime) * liveRate, 0, engineDuration());
+      }
+      return pausedPosition;
+    }
+
+    function finalizeRateRamp(){
+      var r = rateRamp;
+      var pos = clamp(positionAtRateRamp(r, r.duration), 0, engineDuration());
+      rateRamp = null;
+      liveRate = r.toRate;
+      startOffset = pos;
+      startedAtCtxTime = audioCtx.currentTime;
+    }
+
+    // Jog nudge: bend the live rate toward `toRate` over `duration`, retargeting
+    // smoothly even if a previous nudge ramp is still in flight (so a quick
+    // back-and-forth on the jog buttons doesn't snap or desync the waveform).
+    function startRateRamp(toRate, duration){
+      if (state !== "playing" || !sourceNode) return;
+      var now = audioCtx.currentTime;
+      var fromRate = rateRamp ? instantRateAtRamp(rateRamp, now - rateRamp.startCtxTime) : liveRate;
+      var fromPos = getPosition();
+      rateRamp = { startCtxTime: now, startPos: fromPos, fromRate: fromRate, toRate: toRate, duration: duration };
+      sourceNode.playbackRate.cancelScheduledValues(now);
+      sourceNode.playbackRate.setValueAtTime(fromRate, now);
+      sourceNode.playbackRate.linearRampToValueAtTime(toRate, now + duration);
+    }
+
+    var NUDGE_PERCENT = 8;      // how far a held jog button bends the rate (was 6, then 4)
+    var NUDGE_RAMP_IN = 0.1;    // seconds to bend in — stays quick, snappy response
+    var NUDGE_RAMP_OUT = 0.3;   // seconds to settle back to tempo — slower, smoother release
+    function nudgeStart(direction){ startRateRamp(currentRate * (1 + direction * NUDGE_PERCENT / 100), NUDGE_RAMP_IN); }
+    function nudgeEnd(){ startRateRamp(currentRate, NUDGE_RAMP_OUT); }
+
+    function startSteadyPlayback(pos){
+      stopNode();
+      sourceNode = audioCtx.createBufferSource();
+      sourceNode.buffer = audioBuffer;
+      sourceNode.playbackRate.value = currentRate;
+      sourceGainNode = audioCtx.createGain();
+      var now0 = audioCtx.currentTime;
+      sourceGainNode.gain.setValueAtTime(0, now0);
+      sourceGainNode.gain.linearRampToValueAtTime(1, now0 + DECLICK);
+      sourceNode.connect(sourceGainNode).connect(gainNode);
+      sourceNode.start(0, pos);
+      startOffset = pos;
+      startedAtCtxTime = audioCtx.currentTime;
+      liveRate = currentRate;
+      rateRamp = null;
+      state = "playing";
+      sourceNode.onended = function(){
+        if (state === "playing"){
+          state = "stopped";
+          pausedPosition = engineDuration();
+          renderTransportUI();
+        }
+      };
+    }
+
+    function startStutter(pos){
+      stopNode();
+      stutterPos = pos;
+      pausedPosition = pos;
+      state = "stuttering";
+      playStutterChunk();
+    }
+    function playStutterChunk(){
+      if (state !== "stuttering") return;
+      var src = audioCtx.createBufferSource();
+      src.buffer = audioBuffer;
+      src.playbackRate.value = currentRate;
+      var g = audioCtx.createGain();
+      var now = audioCtx.currentTime;
+      var grainLen = Math.max(0, Math.min(STUTTER_CHUNK, engineDuration() - stutterPos));
+      g.gain.setValueAtTime(0, now);
+      g.gain.linearRampToValueAtTime(1, now + DECLICK);
+      if (grainLen > DECLICK * 2){
+        // also fade out right before the grain's own natural end (its buffer
+        // duration cuts off there regardless), so that edge doesn't click either
+        g.gain.setValueAtTime(1, now + grainLen - DECLICK);
+        g.gain.linearRampToValueAtTime(0, now + grainLen);
+      }
+      src.connect(g).connect(gainNode);
+      src.onended = function(){ try { src.disconnect(); } catch(e){} try { g.disconnect(); } catch(e){} };
+      src.start(0, stutterPos, grainLen);
+      sourceNode = src;
+      sourceGainNode = g;
+      stutterTimer = setTimeout(playStutterChunk, STUTTER_CYCLE * 1000);
+
+      // PLAY blinks in time with the stutter: on while the chunk is actually
+      // sounding, off during the silent half of the cycle.
+      els.playBtn.classList.add("stutter-blink");
+      els.cueBtn.classList.add("stutter-blink");
+      clearTimeout(stutterBlinkOffTimer);
+      stutterBlinkOffTimer = setTimeout(function(){
+        els.playBtn.classList.remove("stutter-blink");
+        els.cueBtn.classList.remove("stutter-blink");
+      }, grainLen * 1000);
+    }
+
+    function isAnimating(){ return state === "playing"; }
+    function isPlayingLike(){ return state === "playing"; }
+
+    function renderTransportUI(){
+      var playing = isPlayingLike();
+      els.playBtn.textContent = playing ? "❚❚" : "▶";
+      els.playBtn.classList.toggle("is-playing", playing);
+      els.cueBtn.classList.toggle("is-playing", playing);
+    }
+
+    function kickLoop(){
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(waveLoop);
+    }
+
+    function playAction(){
+      if (!audioBuffer) return;
+      resumeCtx();
+      if (isPlayingLike()) return;
+      startSteadyPlayback(pausedPosition);
+      kickLoop();
+      renderTransportUI();
+    }
+
+    function pauseAction(){
+      if (!audioBuffer) return;
+      if (state !== "playing") return;
+      startStutter(getPosition());
+      kickLoop();
+      renderTransportUI();
+    }
+
+    function togglePlay(){ if (isPlayingLike()) pauseAction(); else playAction(); }
+
+    function hardSeek(pos){
+      if (!audioBuffer) return;
+      pos = clamp(pos, 0, engineDuration());
+      resumeCtx();
+      if (state === "playing") startSteadyPlayback(pos);
+      else if (state === "stuttering") startStutter(pos);
+      else { stopNode(); pausedPosition = pos; state = "stopped"; }
+      kickLoop();
+      renderTransportUI();
+    }
+
+    function hardStopAt(pos){
+      if (!audioBuffer) return;
+      pos = clamp(pos, 0, engineDuration());
+      resumeCtx();
+      stopNode();
+      pausedPosition = pos;
+      state = "stopped";
+      kickLoop();
+      renderTransportUI();
+    }
+
+    els.playBtn.addEventListener("click", togglePlay);
+
+    // Scoped by deck id too, not just track id — otherwise both decks share
+    // one cue point whenever they happen to have the same track loaded.
+    function cueStorageKey(){ return "sc_cue_" + opts.id + "_" + currentTrackKey; }
+    function getCue(){
+      if (!currentTrackKey) return undefined;
+      var raw = localStorage.getItem(cueStorageKey());
+      return raw === null ? undefined : parseFloat(raw);
+    }
+    function setCue(t){
+      if (!currentTrackKey) return;
+      localStorage.setItem(cueStorageKey(), String(t));
+      drawWave(); drawZoom();
+    }
+
+    function isPointOverEl(x, y, el){
+      var r = el.getBoundingClientRect();
+      return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+    }
+
+    els.cueBtn.addEventListener("pointerdown", function(e){
+      e.preventDefault();
+      if (!currentTrackKey || !audioBuffer) return;
+      resumeCtx();
+      // Capture so a drag off CUE onto PLAY still reports pointermove/up here
+      // (needed to detect the "slide from CUE onto PLAY" release below), and
+      // pointerleave no longer ends the hold early just from crossing the edge.
+      try { els.cueBtn.setPointerCapture(e.pointerId); } catch(err){}
+      var cue = getCue();
+      if (!isPlayingLike()){
+        var pos = getPosition();
+        if (cue !== undefined && Math.abs(pos - cue) < CUE_EPS){
+          cuePreviewActive = true;
+          els.cueBtn.classList.add("is-armed");
+          startSteadyPlayback(pos);
+          kickLoop();
+          renderTransportUI();
+        } else {
+          setCue(pos);
+          if (state === "stuttering"){ stopNode(); state = "stopped"; renderTransportUI(); }
+        }
+      } else {
+        var target = cue !== undefined ? cue : 0;
+        hardStopAt(target);
+        if (cue === undefined) setCue(0);
+      }
+    });
+    els.cueBtn.addEventListener("pointerup", function(e){
+      if (!cuePreviewActive) return;
+      // Held CUE, released over PLAY: commit to full playback right where it
+      // already is (a preview-hold is just normal playback under the hood),
+      // instead of snapping back to the cue point like a plain release does.
+      var releasedOnPlay = isPointOverEl(e.clientX, e.clientY, els.playBtn);
+      cuePreviewActive = false;
+      els.cueBtn.classList.remove("is-armed");
+      if (!releasedOnPlay){
+        var cue = getCue();
+        hardStopAt(cue !== undefined ? cue : 0);
+      }
+    });
+    els.cueBtn.addEventListener("pointercancel", endCuePreview);
+    function endCuePreview(){
+      if (!cuePreviewActive) return;
+      cuePreviewActive = false;
+      els.cueBtn.classList.remove("is-armed");
+      var cue = getCue();
+      hardStopAt(cue !== undefined ? cue : 0);
+    }
+
+    root.addEventListener("keydown", function(e){
+      if (e.code === "Space"){ togglePlay(); e.preventDefault(); }
+    });
+
+    function setTempo(percent){
+      percent = parseFloat(percent);
+      currentRate = 1 + percent / 100;
+      // While a jog nudge is bending the rate, leave it alone — the new
+      // set-tempo just becomes whatever it settles back to on release.
+      if (!rateRamp && sourceNode && (state === "playing" || state === "stuttering")){
+        if (state === "playing"){
+          var pos = getPosition();
+          startOffset = pos;
+          startedAtCtxTime = audioCtx.currentTime;
+          liveRate = currentRate;
+        }
+        sourceNode.playbackRate.setValueAtTime(currentRate, audioCtx.currentTime);
+      }
+      var sign = percent > 0 ? "+" : "";
+      els.speedVal.textContent = sign + percent.toFixed(1) + "%";
+    }
+    els.speed.addEventListener("input", function(){ setTempo(els.speed.value); });
+    els.speedReset.addEventListener("click", function(){ els.speed.value = 0; setTempo(0); });
+    applyPitchRange();
+    setTempo(0);
+
+    // ---- Overview waveform ----
+    var waveCtx = els.wave.getContext("2d");
+    function resizeWave(){
+      var rect = els.wave.getBoundingClientRect();
+      var dpr = window.devicePixelRatio || 1;
+      els.wave.width = Math.max(1, Math.round(rect.width * dpr));
+      els.wave.height = Math.max(1, Math.round(rect.height * dpr));
+      drawWave();
+    }
+    window.addEventListener("resize", resizeWave);
+
+    function drawWave(){
+      var w = els.wave.width, h = els.wave.height;
+      waveCtx.clearRect(0, 0, w, h);
+      if (!waveSamples || !waveSamples.length) return;
+      var dur = engineDuration();
+      var progressX = (dur ? getPosition() / dur : 0) * w;
+
+      var n = waveSamples.length;
+      var bars = Math.max(1, Math.min(n, Math.round(w)));
+      var step = n / bars;
+      var barW = w / bars;
+      var gap = barW > 3 ? 1 : 0;
+      var max = 0;
+      for (var i=0;i<n;i++) if (waveSamples[i] > max) max = waveSamples[i];
+      if (!max) max = 1;
+      for (var b=0;b<bars;b++){
+        var idx = Math.min(n-1, Math.floor(b*step));
+        var amp = waveSamples[idx] / max;
+        var barH = Math.max(1, amp * h * 0.92);
+        var x = b * barW, y = (h - barH) / 2;
+        waveCtx.fillStyle = (x <= progressX) ? "rgba(255,255,255,0.22)" : "#ff5500";
+        waveCtx.fillRect(x, y, Math.max(1, barW - gap), barH);
+      }
+      if (dur){
+        var cue = getCue();
+        if (cue !== undefined){
+          waveCtx.fillStyle = "#3ecf8e";
+          waveCtx.fillRect((cue/dur)*w, 0, 2, h);
+        }
+      }
+    }
+
+    function seekFromEvent(e){
+      var rect = els.wave.getBoundingClientRect();
+      var clientX = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
+      return clamp((clientX - rect.left) / rect.width, 0, 1) * engineDuration();
+    }
+    els.wave.addEventListener("pointerdown", function(e){
+      if (!audioBuffer) return;
+      waveDragging = true; els.wave.setPointerCapture(e.pointerId);
+      hardSeek(seekFromEvent(e)); drawWave(); drawZoom();
+    });
+    els.wave.addEventListener("pointermove", function(e){
+      if (!waveDragging || !audioBuffer) return;
+      hardSeek(seekFromEvent(e)); drawWave(); drawZoom();
+    });
+    els.wave.addEventListener("pointerup", function(){ waveDragging = false; });
+    els.wave.addEventListener("pointercancel", function(){ waveDragging = false; });
+
+    // ---- Zoom waveform (scrolling ~1.5s window, sample-accurate peaks) ----
+    var zoomCtx = els.zoomWave.getContext("2d");
+    var ZOOM_WINDOW_SEC = 1.5;
+    var zoomPeaks = null;
+    var zoomBucketDur = 0.005;
+
+    function computePeaks(buffer){
+      var data = buffer.getChannelData(0);
+      var bucketSamples = Math.max(1, Math.round(buffer.sampleRate * zoomBucketDur));
+      var bucketCount = Math.ceil(data.length / bucketSamples);
+      var peaks = new Float32Array(bucketCount * 2);
+      for (var b = 0; b < bucketCount; b++){
+        var start = b * bucketSamples, end = Math.min(data.length, start + bucketSamples);
+        var mn = 1, mx = -1;
+        for (var i = start; i < end; i++){ var v = data[i]; if (v<mn) mn=v; if (v>mx) mx=v; }
+        peaks[b*2]=mn; peaks[b*2+1]=mx;
+      }
+      return peaks;
+    }
+
+    function resizeZoom(){
+      var rect = els.zoomWave.getBoundingClientRect();
+      var dpr = window.devicePixelRatio || 1;
+      els.zoomWave.width = Math.max(1, Math.round(rect.width * dpr));
+      els.zoomWave.height = Math.max(1, Math.round(rect.height * dpr));
+      drawZoom();
+    }
+    window.addEventListener("resize", resizeZoom);
+
+    function drawZoom(){
+      var w = els.zoomWave.width, h = els.zoomWave.height;
+      zoomCtx.clearRect(0, 0, w, h);
+      var dur = engineDuration();
+      var cur = getPosition();
+      var half = ZOOM_WINDOW_SEC / 2;
+      var t0 = cur - half, t1 = cur + half;
+      var centerX = w / 2, maxHalfW = w / 2 - 3;
+
+      if (zoomPeaks && zoomPeaks.length){
+        var bucketCount = zoomPeaks.length / 2;
+        for (var y = 0; y < h; y++){
+          var t = t0 + (y / h) * (t1 - t0);
+          if (t < 0 || t > dur) continue;
+          var bi = Math.floor(t / zoomBucketDur);
+          if (bi < 0 || bi >= bucketCount) continue;
+          var amp = Math.max(Math.abs(zoomPeaks[bi*2]), Math.abs(zoomPeaks[bi*2+1]));
+          var halfW = Math.min(1, amp) * maxHalfW;
+          zoomCtx.fillStyle = (t < cur) ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.85)";
+          zoomCtx.fillRect(centerX - halfW, y, halfW * 2, 1);
+        }
+      } else if (waveSamples && waveSamples.length && dur){
+        var maxSample = 0;
+        for (var k=0;k<waveSamples.length;k++) if (waveSamples[k] > maxSample) maxSample = waveSamples[k];
+        if (!maxSample) maxSample = 1;
+        for (var y2 = 0; y2 < h; y2++){
+          var t2 = t0 + (y2 / h) * (t1 - t0);
+          if (t2 < 0 || t2 > dur) continue;
+          var idx = Math.min(waveSamples.length - 1, Math.max(0, Math.round((t2/dur) * waveSamples.length)));
+          var halfW2 = (waveSamples[idx] / maxSample) * maxHalfW;
+          zoomCtx.fillStyle = (t2 < cur) ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.55)";
+          zoomCtx.fillRect(centerX - halfW2, y2, halfW2 * 2, 1);
+        }
+      }
+
+      var dpr = window.devicePixelRatio || 1;
+      zoomCtx.fillStyle = "#ff5500";
+      zoomCtx.fillRect(0, h/2 - dpr, w, dpr*2);
+
+      var cue = getCue();
+      if (cue !== undefined && cue >= t0 && cue <= t1){
+        zoomCtx.fillStyle = "#3ecf8e";
+        zoomCtx.fillRect(0, ((cue-t0)/(t1-t0))*h - dpr, w, dpr*2);
+      }
+    }
+
+    // Relative drag, not an absolute-position jump: pressing down anywhere on
+    // the zoom waveform must NOT snap playback to that spot — only actually
+    // moving the finger scrubs, by however far it moved. A full canvas-height
+    // drag covers ZOOM_DRAG_WINDOW_SEC of audio (3x the original 0.7s, so the
+    // same finger travel now scrubs 3x more).
+    var ZOOM_DRAG_WINDOW_SEC = 2.1;
+    var zoomDragStartY = 0;
+    var zoomDragStartPos = 0;
+    // Holding the drag past the canvas's top/bottom edge keeps scrubbing at a
+    // constant rate (instead of freezing at the clamped 0/1 ratio) until the
+    // pointer comes back inside the canvas or is released — lets a single
+    // drag reach arbitrarily far without needing to lift and re-grab.
+    var ZOOM_AUTOSCROLL_RATE = 1.5; // seconds of audio per second held past the edge
+    var zoomAutoScrollDir = 0; // -1 above, 0 inside, +1 below
+    var zoomAutoScrollRAF = null;
+    var zoomAutoScrollLastT = 0;
+    function zoomAutoScrollStep(now){
+      if (!zoomDragging || zoomAutoScrollDir === 0){ zoomAutoScrollRAF = null; return; }
+      var dt = (now - zoomAutoScrollLastT) / 1000;
+      zoomAutoScrollLastT = now;
+      hardSeek(getPosition() + zoomAutoScrollDir * ZOOM_AUTOSCROLL_RATE * dt);
+      drawWave(); drawZoom();
+      zoomAutoScrollRAF = requestAnimationFrame(zoomAutoScrollStep);
+    }
+    function zoomAutoScrollKick(){
+      if (zoomAutoScrollDir !== 0 && zoomAutoScrollRAF == null){
+        zoomAutoScrollLastT = performance.now();
+        zoomAutoScrollRAF = requestAnimationFrame(zoomAutoScrollStep);
+      }
+    }
+    els.zoomWave.addEventListener("pointerdown", function(e){
+      if (!audioBuffer) return;
+      zoomDragging = true; zoomAutoScrollDir = 0; els.zoomWave.setPointerCapture(e.pointerId);
+      zoomDragStartY = (e.touches && e.touches[0]) ? e.touches[0].clientY : e.clientY;
+      zoomDragStartPos = getPosition(); // no seek here — a bare tap must not jump
+    });
+    els.zoomWave.addEventListener("pointermove", function(e){
+      if (!zoomDragging || !audioBuffer) return;
+      var rect = els.zoomWave.getBoundingClientRect();
+      var clientY = (e.touches && e.touches[0]) ? e.touches[0].clientY : e.clientY;
+      if (clientY < rect.top){ zoomAutoScrollDir = -1; zoomAutoScrollKick(); return; }
+      if (clientY > rect.bottom){ zoomAutoScrollDir = 1; zoomAutoScrollKick(); return; }
+      if (zoomAutoScrollDir !== 0){
+        // Just came back inside bounds after auto-scrolling — re-anchor the
+        // drag reference here so position doesn't jump on the transition.
+        zoomAutoScrollDir = 0;
+        zoomDragStartY = clientY; zoomDragStartPos = getPosition();
+        return;
+      }
+      var dt = ((clientY - zoomDragStartY) / rect.height) * ZOOM_DRAG_WINDOW_SEC;
+      hardSeek(zoomDragStartPos + dt); drawWave(); drawZoom();
+    });
+    els.zoomWave.addEventListener("pointerup", function(){ zoomDragging = false; zoomAutoScrollDir = 0; });
+    els.zoomWave.addEventListener("pointercancel", function(){ zoomDragging = false; zoomAutoScrollDir = 0; });
+
+    // Right-hand readout shows time remaining (not total duration), with a
+    // minus sign, blinking once 20s or less are left in the track.
+    var BLINK_REMAINING_SEC = 20;
+    function updateTimeDisplay(){
+      els.curTime.textContent = fmt(getPosition());
+      var remaining = engineDuration() - getPosition();
+      if (!isFinite(remaining) || remaining < 0) remaining = 0;
+      els.durTime.textContent = "-" + fmt(remaining);
+      els.durTime.classList.toggle("blink-warn", remaining <= BLINK_REMAINING_SEC);
+    }
+
+    function waveLoop(){
+      if (rateRamp && (audioCtx.currentTime - rateRamp.startCtxTime) >= rateRamp.duration) finalizeRateRamp();
+      if (!waveDragging && !zoomDragging) updateTimeDisplay();
+      drawWave(); drawZoom();
+      if (isAnimating()) rafId = requestAnimationFrame(waveLoop);
+    }
+
+    els.jogBack.addEventListener("pointerdown", function(e){ e.preventDefault(); resumeCtx(); nudgeStart(-1); });
+    els.jogFwd.addEventListener("pointerdown", function(e){ e.preventDefault(); resumeCtx(); nudgeStart(1); });
+    els.jogBack.addEventListener("pointerup", nudgeEnd);
+    els.jogBack.addEventListener("pointerleave", nudgeEnd);
+    els.jogBack.addEventListener("pointercancel", nudgeEnd);
+    els.jogFwd.addEventListener("pointerup", nudgeEnd);
+    els.jogFwd.addEventListener("pointerleave", nudgeEnd);
+    els.jogFwd.addEventListener("pointercancel", nudgeEnd);
+
+    // ---- Loading a track ----
+    function proxyFetch(path, params){
+      var qs = Object.keys(params).map(function(k){ return k + "=" + encodeURIComponent(params[k]); }).join("&");
+      return fetch(apiBase + path + "?" + qs).then(function(r){
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      });
+    }
+
+    function loadTrack(url){
+      setStatus("Загрузка...", "");
+      els.loadBtn.disabled = true;
+      proxyFetch("/api/resolve", { url: url, client_id: clientId })
+        .then(function(track){
+          if (track.kind !== "track") throw new Error("Не трек (плейлисты не поддерживаются)");
+          var transcodings = (track.media && track.media.transcodings) || [];
+          var t = transcodings.find(function(x){ return x.format && x.format.protocol === "progressive"; })
+               || transcodings.find(function(x){ return x.format && x.format.protocol === "hls"; });
+          if (!t) throw new Error("Нет доступного потока");
+          var streamPromise = proxyFetch("/api/media", { url: t.url, client_id: clientId });
+          var wavePromise = track.waveform_url
+            ? fetch(track.waveform_url).then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; })
+            : Promise.resolve(null);
+          return Promise.all([streamPromise, wavePromise]).then(function(results){
+            return { track: track, streamUrl: results[0].url, waveform: results[1] };
+          });
+        })
+        .then(function(res){
+          setStatus("Декодирую...", "");
+          return fetch(res.streamUrl)
+            .then(function(r){ return r.arrayBuffer(); })
+            .then(function(buf){ resumeCtx(); return audioCtx.decodeAudioData(buf); })
+            .then(function(buffer){ return { track: res.track, waveform: res.waveform, buffer: buffer }; });
+        })
+        .then(function(res){
+          currentTrackKey = String(res.track.id);
+          var artist = (res.track.user && res.track.user.username) || "";
+          setStatus((res.track.title || "—") + (artist ? " — " + artist : ""), "ok");
+          closeLoadModal();
+
+          stopNode(); state = "stopped"; pausedPosition = 0;
+          // Every load always cues to 0 — no cross-session memory, so a cue
+          // point never carries over from an earlier time this same track
+          // happened to be loaded on this deck.
+          setCue(0);
+          audioBuffer = res.buffer;
+          zoomPeaks = computePeaks(res.buffer);
+          waveSamples = (res.waveform && res.waveform.samples) || null;
+
+          resizeWave(); resizeZoom();
+          updateTimeDisplay();
+          renderTransportUI(); drawWave(); drawZoom();
+        })
+        .catch(function(err){ setStatus("Ошибка: " + err.message, "err"); })
+        .finally(function(){ els.loadBtn.disabled = false; });
+    }
+
+    els.loadBtn.addEventListener("click", function(){
+      var v = els.url.value.trim();
+      if (v) loadTrack(v);
+    });
+    els.url.addEventListener("keydown", function(e){
+      if (e.key === "Enter") els.loadBtn.click();
+    });
+
+    els.url.value = opts.defaultTrackUrl;
+    loadTrack(opts.defaultTrackUrl);
+
+    return { output: gainNode };
+  }
+
+  // =========================================================================
+  // Mixer (2-channel, Xone:92-inspired) — trim → 3-band kill-EQ → fader,
+  // with a cue/solo tap and an equal-power crossfader into master. Each
+  // channel's "source" is a deck's output GainNode instead of a file/<audio>.
+  // =========================================================================
+
+  function smoothSet(param, value, ramp){
+    param.setTargetAtTime(value, audioCtx.currentTime, ramp || 0.012);
+  }
+
+  var EQ_CUT_DB = -70, EQ_BOOST_DB = 6;
+  function eqDb(t){ return t <= 0.5 ? EQ_CUT_DB * (1 - t/0.5) : EQ_BOOST_DB * ((t-0.5)/0.5); }
+
+  function makeKnob(o){
+    var value = o.def;
+    function render(){
+      var t = (value - o.min) / (o.max - o.min);
+      o.el.style.setProperty("--deg", (-135 + t*270) + "deg");
+      if (o.valEl) o.valEl.textContent = o.format ? o.format(value) : Math.round(value*100) + "%";
+    }
+    function setValue(v){ value = clamp(v, o.min, o.max); render(); if (o.onChange) o.onChange(value); }
+    var dragging = false, startY = 0, startVal = 0;
+    o.el.addEventListener("pointerdown", function(e){
+      dragging = true; startY = e.clientY; startVal = value;
+      o.el.setPointerCapture(e.pointerId); resumeCtx();
+    });
+    o.el.addEventListener("pointermove", function(e){
+      if (!dragging) return;
+      setValue(startVal + ((startY - e.clientY) / 150) * (o.max - o.min));
+    });
+    o.el.addEventListener("pointerup", function(){ dragging = false; });
+    o.el.addEventListener("pointercancel", function(){ dragging = false; });
+    o.el.addEventListener("dblclick", function(){ setValue(o.def); });
+    setValue(o.def);
+  }
+
+  // EQ knobs, fader and meter are now three separately-mounted pieces (not one
+  // stacked "strip") so the whole mixer reads as a single horizontal band at
+  // fader height — EQ1 | Fader1 | [master + meters] | Fader2 | EQ2 — instead
+  // of a knob block sitting above a fader block on each channel.
+  function buildEqCol(mountEl){
+    mountEl.innerHTML =
+      '<div class="mx-knobgrp"><div class="mx-knoblabel">Trim</div><div class="mx-knob small" data-k="trim"></div></div>' +
+      '<div class="mx-knobgrp"><div class="mx-knoblabel">High</div><div class="mx-knob" data-k="high"></div></div>' +
+      '<div class="mx-knobgrp"><div class="mx-knoblabel">Mid</div><div class="mx-knob" data-k="mid"></div></div>' +
+      '<div class="mx-knobgrp"><div class="mx-knoblabel">Low</div><div class="mx-knob" data-k="low"></div></div>';
+  }
+  function buildFader(mountEl){
+    mountEl.innerHTML = '<input type="range" min="0" max="1" step="0.001" value="1">';
+    return mountEl.querySelector("input");
+  }
+  function buildMeterSegs(meterEl){
+    for (var i=0;i<12;i++){ var seg = document.createElement("div"); seg.className = "mx-seg"; meterEl.appendChild(seg); }
+    return meterEl.querySelectorAll(".mx-seg");
+  }
+
+  // ---- master graph (created immediately — ctx always exists on this page) ----
+  var masterSum = audioCtx.createGain(); masterSum.gain.value = 1;
+  var masterLevelGain = audioCtx.createGain(); masterLevelGain.gain.value = 0.5;
+  var masterAnalyser = audioCtx.createAnalyser(); masterAnalyser.fftSize = 256;
+  masterSum.connect(masterLevelGain).connect(masterAnalyser).connect(audioCtx.destination);
+
+  function createChannel(label, sourceNode, eqMount, faderMount, meterEl){
+    buildEqCol(eqMount);
+    var faderInput = buildFader(faderMount);
+    var meterSegs = buildMeterSegs(meterEl);
+
+    var inputBoost = audioCtx.createGain(); inputBoost.gain.value = 2;
+    var trim = audioCtx.createGain();
+    var low = audioCtx.createBiquadFilter(); low.type = "lowshelf"; low.frequency.value = 240;
+    var mid = audioCtx.createBiquadFilter(); mid.type = "peaking"; mid.frequency.value = 1624; mid.Q.value = 0.8;
+    var high = audioCtx.createBiquadFilter(); high.type = "highshelf"; high.frequency.value = 7000;
+    var fader = audioCtx.createGain(); fader.gain.value = parseFloat(faderInput.value);
+    var xfade = audioCtx.createGain(); xfade.gain.value = 1;
+    var analyser = audioCtx.createAnalyser(); analyser.fftSize = 256;
+
+    sourceNode.connect(inputBoost).connect(trim).connect(low).connect(mid).connect(high).connect(fader);
+    fader.connect(analyser);
+    fader.connect(xfade).connect(masterSum);
+
+    var trimK = eqMount.querySelector('[data-k="trim"]');
+    makeKnob({ el: trimK, min:0, max:1, def:0.5, onChange: function(v){ smoothSet(trim.gain, v); } });
+    var highK = eqMount.querySelector('[data-k="high"]');
+    makeKnob({ el: highK, min:0, max:1, def:0.5, onChange: function(t){ smoothSet(high.gain, eqDb(t)); } });
+    var midK = eqMount.querySelector('[data-k="mid"]');
+    makeKnob({ el: midK, min:0, max:1, def:0.5, onChange: function(t){ smoothSet(mid.gain, eqDb(t)); } });
+    var lowK = eqMount.querySelector('[data-k="low"]');
+    makeKnob({ el: lowK, min:0, max:1, def:0.5, onChange: function(t){ smoothSet(low.gain, eqDb(t)); } });
+
+    faderInput.addEventListener("input", function(){ smoothSet(fader.gain, parseFloat(faderInput.value)); });
+
+    // Momentary kill button, above the fader: held down mutes the channel
+    // and visibly drops the fader to zero; releasing snaps it back to
+    // wherever it was.
+    var topBtn = faderMount.parentElement.querySelector(".mx-topbtn");
+    var savedFaderValue = null;
+    function killStart(e){
+      if (e) e.preventDefault();
+      if (savedFaderValue !== null) return;
+      savedFaderValue = faderInput.value;
+      faderInput.value = 0;
+      topBtn.classList.add("active");
+      smoothSet(fader.gain, 0, 0.01);
+    }
+    function killEnd(){
+      if (savedFaderValue === null) return;
+      faderInput.value = savedFaderValue;
+      smoothSet(fader.gain, parseFloat(savedFaderValue), 0.01);
+      savedFaderValue = null;
+      topBtn.classList.remove("active");
+    }
+    topBtn.addEventListener("pointerdown", killStart);
+    topBtn.addEventListener("pointerup", killEnd);
+    topBtn.addEventListener("pointerleave", killEnd);
+    topBtn.addEventListener("pointercancel", killEnd);
+
+    function drawMeter(){
+      var data = new Uint8Array(analyser.fftSize);
+      analyser.getByteTimeDomainData(data);
+      var peak = 0;
+      for (var i=0;i<data.length;i++){ var d = Math.abs(data[i]-128)/128; if (d>peak) peak=d; }
+      var lit = Math.round(peak * meterSegs.length * 1.4);
+      for (var s=0;s<meterSegs.length;s++){
+        var seg = meterSegs[s]; seg.className = "mx-seg";
+        if (s < lit){
+          if (s >= meterSegs.length-2) seg.className = "mx-seg on-r";
+          else if (s >= meterSegs.length-4) seg.className = "mx-seg on-y";
+          else seg.className = "mx-seg on-g";
+        }
+      }
+      requestAnimationFrame(drawMeter);
+    }
+    requestAnimationFrame(drawMeter);
+
+    return { xfade: xfade };
+  }
+
+  // ---- instantiate: two decks, two mixer channels, wired together ----
+  var deckA = createDeck({ root: document.getElementById("deckA"), id: "A", defaultTrackUrl: DEFAULT_TRACK_URL, mirror: false });
+  var deckB = createDeck({ root: document.getElementById("deckB"), id: "B", defaultTrackUrl: DEFAULT_TRACK_URL, mirror: true });
+  var chA = createChannel("1", deckA.output,
+    document.getElementById("eqColA"), document.getElementById("faderColA"), document.getElementById("meterA"));
+  var chB = createChannel("2", deckB.output,
+    document.getElementById("eqColB"), document.getElementById("faderColB"), document.getElementById("meterB"));
+
+  var xfEl = document.getElementById("crossfader");
+  function applyCrossfader(pos){
+    var angle = pos * Math.PI / 2;
+    smoothSet(chA.xfade.gain, Math.cos(angle));
+    smoothSet(chB.xfade.gain, Math.sin(angle));
+  }
+  xfEl.addEventListener("input", function(){ applyCrossfader(parseFloat(xfEl.value)); });
+  applyCrossfader(parseFloat(xfEl.value));
+
+  var masterMeterEl = document.getElementById("masterMeter");
+  for (var mi=0; mi<12; mi++){ var mseg = document.createElement("div"); mseg.className = "mx-seg"; masterMeterEl.appendChild(mseg); }
+  var masterMeterSegs = masterMeterEl.querySelectorAll(".mx-seg");
+
+  makeKnob({
+    el: document.getElementById("masterKnob"),
+    min:0, max:1, def:0.5, onChange: function(v){ smoothSet(masterLevelGain.gain, v); }
+  });
+
+  function drawMasterMeter(){
+    var data = new Uint8Array(masterAnalyser.fftSize);
+    masterAnalyser.getByteTimeDomainData(data);
+    var peak = 0;
+    for (var i=0;i<data.length;i++){ var d = Math.abs(data[i]-128)/128; if (d>peak) peak=d; }
+    var lit = Math.round(peak * masterMeterSegs.length * 1.4);
+    for (var s=0;s<masterMeterSegs.length;s++){
+      var seg = masterMeterSegs[s]; seg.className = "mx-seg";
+      if (s < lit){
+        if (s >= masterMeterSegs.length-2) seg.className = "mx-seg on-r";
+        else if (s >= masterMeterSegs.length-4) seg.className = "mx-seg on-y";
+        else seg.className = "mx-seg on-g";
+      }
+    }
+    requestAnimationFrame(drawMasterMeter);
+  }
+  requestAnimationFrame(drawMasterMeter);
+
+})();
+</script>
+</body>
+</html>

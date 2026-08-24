@@ -39,6 +39,19 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Generic static serve for any other .html file living directly in the
+  // project folder (e.g. /dj-booth.html) — kept to a simple basename match,
+  // no path traversal.
+  if (/^\/[A-Za-z0-9_-]+\.html$/.test(u.pathname)) {
+    var filePath = path.join(__dirname, path.basename(u.pathname));
+    fs.readFile(filePath, function (err, data) {
+      if (err) { res.writeHead(404); res.end("Not found"); return; }
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(data);
+    });
+    return;
+  }
+
   if (u.pathname === "/api/resolve") {
     var trackUrl = u.searchParams.get("url");
     var clientId = u.searchParams.get("client_id");
