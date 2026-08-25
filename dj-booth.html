@@ -21,7 +21,13 @@
   *{
     box-sizing:border-box; -webkit-tap-highlight-color:transparent;
     -webkit-touch-callout:none; -webkit-user-drag:none;
+    -webkit-user-select:none; user-select:none;
   }
+  /* Form fields are the one place selection/editing must still work —
+     iOS Safari especially needs the -webkit- prefix un-done explicitly
+     here, not just relying on the unprefixed property, or long-press
+     text selection can still creep in elsewhere on the page. */
+  input, textarea{ -webkit-user-select:text; user-select:text; }
   /* Themed scrollbar (page + any internal scroll area) instead of the OS/
      browser default — Firefox via scrollbar-color (inherits down), WebKit/
      Chromium need the same rule repeated on each actual scrolling element. */
@@ -336,8 +342,8 @@
   /* Gray frame around the fader's whole working area (its full travel
      length), not around the moving cap — width matches the cap's own
      visible width (31.5px) + 1px gap each side, height spans the track's
-     full travel (132px) + 1px gap top/bottom. pitch-wrap's own box already
-     equals pitch-track's (38x132), so centering here lines up with it. */
+     full travel (122px) + 1px gap top/bottom. pitch-wrap's own box already
+     equals pitch-track's (38x122), so centering here lines up with it. */
   .pitch-wrap::before{
     content:''; position:absolute; left:50%; top:50%;
     width:33.5px; height:124px; transform:translate(-50%,-50%);
@@ -404,7 +410,7 @@
     display:grid; grid-template-columns:auto auto auto auto auto;
     column-gap:14px; row-gap:14px; justify-content:space-between; align-items:start;
   }
-  /* EQ columns get a min-width matching the deck's CUE/PLAY column (56px,
+  /* EQ columns get a min-width matching the deck's CUE/PLAY column (49px,
      the width of those circular buttons) so that — since both are centered
      content within a column of the same width, starting from the same
      horizontal padding — their centers line up with the CUE/PLAY buttons
@@ -426,20 +432,15 @@
      it needs to be, with the meters shortened to make room above it so the
      whole column (Master + meters + crossfader) still bottoms out level
      with the faders. */
-  /* Mixer height trimmed ~12% (324px -> 285px per column) by squeezing the
-     gap between stacked knob/fader elements (16px -> 3px) and shortening the
-     fader track itself accordingly — knob/button sizes untouched. All three
-     column families (EQ, fader, center) still bottom out level: EQ column
-     4*69 + 3*3 = 285; fader column 69 + 3 + 213 = 285; center column
-     69 + 3 + 156(meter, shrunk to absorb the rest) + 3 + 54(xfrow) = 285. */
   /* gap (not margin on a specific child) so master->meters and
      meters->crossfader get the same spacing automatically — center column
      total (62+11+110+11+53=247) stays just under the EQ/fader reference
      height (248), so the mixer's own overall height is unaffected. */
   .mx-center-col{display:flex; flex-direction:column; align-items:center; gap:11px; flex:none;}
   .mx-col{display:flex; flex-direction:column; gap:0; align-items:center; flex-shrink:0;}
-  /* Outer meters (A/B) spread to the same width as the crossfader below
-     them (120px), master meter stays centered between them. */
+  /* Outer meters (A/B) spread apart, roughly matching the crossfader's own
+     width below (110px) so the whole center column reads as one unit;
+     master meter stays centered between them. */
   .mx-metersrow{display:flex; justify-content:space-between; width:108px; align-items:flex-start; flex-shrink:0;}
 
   /* Knobs scaled 1.3x then +12% more (30px->39px->44px, small 20px->26px->29px),
@@ -715,6 +716,14 @@
   document.addEventListener("touchmove", function(e){
     if (e.touches && e.touches.length > 1) e.preventDefault();
   }, { passive: false });
+  // Belt-and-suspenders for text selection too — CSS user-select:none
+  // covers most of it, but a stray long-press can still start a selection
+  // in some mobile browsers. Form fields are excluded so typing/selecting
+  // a URL still works normally.
+  document.addEventListener("selectstart", function(e){
+    var tag = e.target && e.target.tagName;
+    if (tag !== "INPUT" && tag !== "TEXTAREA") e.preventDefault();
+  });
 
   // ---- Shared settings (client_id / API proxy base), used by both decks ----
   var DEFAULT_CLIENT_ID = "Pb72ranhoyt6gw7hM7TkzUItXlMWSNSo";
@@ -1079,7 +1088,6 @@
       }, grainLen * 1000);
     }
 
-    function isAnimating(){ return state === "playing"; }
     function isPlayingLike(){ return state === "playing"; }
 
     function renderTransportUI(){
@@ -1438,7 +1446,7 @@
       if (rateRamp && (audioCtx.currentTime - rateRamp.startCtxTime) >= rateRamp.duration) finalizeRateRamp();
       if (!waveDragging && !zoomDragging) updateTimeDisplay();
       drawWave(); drawZoom();
-      if (isAnimating()) rafId = requestAnimationFrame(waveLoop);
+      if (isPlayingLike()) rafId = requestAnimationFrame(waveLoop);
     }
 
     els.jogBack.addEventListener("pointerdown", function(e){ e.preventDefault(); resumeCtx(); nudgeStart(-1); });
@@ -1499,7 +1507,25 @@
       var deckBtn = e.target.closest(".d-modal-track-deck");
       if (deckBtn){
         var target = decks[deckBtn.getAttribute("data-deck")];
-        if (target && track.permalink_url) target.loadTrack(track.permalink_url);
+        if (!target) return;
+        if (track.permalink_url){
+          target.loadTrack(track.permalink_url);
+          return;
+        }
+        // Still a truncated stub (fillMissingTrackData hasn't caught up
+        // yet, e.g. a huge playlist) — fetch just this one track by id
+        // instead of silently doing nothing.
+        setStatus("Loading track info...", "");
+        proxyFetch("/api/tracks", { ids: String(track.id), client_id: clientId })
+          .then(function(r){
+            var arr = Array.isArray(r) ? r : (r && r.collection) || [];
+            var full = arr[0];
+            if (!full || !full.permalink_url) throw new Error("Track info unavailable");
+            playlistItems[idx] = full;
+            renderPlaylist();
+            target.loadTrack(full.permalink_url);
+          })
+          .catch(function(err){ setStatus("Error: " + err.message, "err"); });
       }
     });
     els.modalClearPlaylist.addEventListener("click", function(){
@@ -1559,10 +1585,17 @@
     // Resolves+streams+decodes+plays a single track on THIS deck right now —
     // used both for this deck's default startup track and whenever a
     // playlist row's A/B button targets this deck.
+    // Guards against two overlapping loadTrack() calls on this deck (e.g. an
+    // A/B click fired right after another one) — only the LAST call's result
+    // is allowed to actually land, so a slow earlier resolve/decode can't
+    // clobber a track that loaded faster after it.
+    var loadGen = 0;
     function loadTrack(url){
+      var myGen = ++loadGen;
       setStatus("LOADING...", "");
       proxyFetch("/api/resolve", { url: url, client_id: clientId })
         .then(function(track){
+          if (myGen !== loadGen) return null;
           if (track.kind !== "track") throw new Error("Unsupported link (not a track)");
           var transcodings = (track.media && track.media.transcodings) || [];
           var t = transcodings.find(function(x){ return x.format && x.format.protocol === "progressive"; })
@@ -1577,6 +1610,7 @@
           });
         })
         .then(function(res){
+          if (!res || myGen !== loadGen) return null;
           // Don't make the user wait for the stream to actually finish
           // downloading/decoding before they get their modal back — close it
           // now and show a LOADING placeholder over the overview waveform
@@ -1590,6 +1624,7 @@
             .then(function(buffer){ return { track: res.track, waveform: res.waveform, buffer: buffer }; });
         })
         .then(function(res){
+          if (!res || myGen !== loadGen){ els.waveLoading.classList.remove("show"); return; }
           els.waveLoading.classList.remove("show");
           currentTrackKey = String(res.track.id);
           var artist = (res.track.user && res.track.user.username) || "";
@@ -1609,6 +1644,7 @@
           renderTransportUI(); drawWave(); drawZoom();
         })
         .catch(function(err){
+          if (myGen !== loadGen) return;
           els.waveLoading.classList.remove("show");
           setStatus("Error: " + err.message, "err");
         });

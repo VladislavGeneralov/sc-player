@@ -11,7 +11,8 @@ const path = require("path");
 const { URL } = require("url");
 
 const PORT = 8787;
-const HTML_FILE = path.join(__dirname, "soundcloud-player.html");
+const HTML_FILE = path.join(__dirname, "dj-booth.html");
+const LEGACY_HTML_FILE = path.join(__dirname, "soundcloud-player.html");
 
 function proxyJson(targetUrl, res) {
   https.get(targetUrl, (upstream) => {
@@ -30,11 +31,22 @@ function proxyJson(targetUrl, res) {
 const server = http.createServer((req, res) => {
   var u = new URL(req.url, "http://localhost:" + PORT);
 
-  if (u.pathname === "/" || u.pathname === "/soundcloud-player.html") {
+  // Root now serves dj-booth.html (the active app) instead of the older
+  // single-deck prototype — that one's still reachable at its own path.
+  if (u.pathname === "/") {
     fs.readFile(HTML_FILE, function (err, data) {
-      if (err) { res.writeHead(500); res.end("Cannot read soundcloud-player.html"); return; }
+      if (err) { res.writeHead(500); res.end("Cannot read dj-booth.html"); return; }
       // no-store: this file gets edited constantly during development, and
       // browsers will otherwise happily serve a stale cached copy on reload.
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+      res.end(data);
+    });
+    return;
+  }
+
+  if (u.pathname === "/soundcloud-player.html") {
+    fs.readFile(LEGACY_HTML_FILE, function (err, data) {
+      if (err) { res.writeHead(500); res.end("Cannot read soundcloud-player.html"); return; }
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
       res.end(data);
     });
