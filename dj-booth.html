@@ -200,7 +200,7 @@
   /* Height matched so the zoomcol (zoom-wrap + jogrow) bottoms out level
      with the PLAY button in the speedbox column beside it. */
   .d-zoom-wrap{
-    position:relative; height:315px; border-radius:8px; overflow:hidden;
+    position:relative; height:275px; border-radius:8px; overflow:hidden;
     background:var(--panel2); border:1px solid var(--border);
   }
   .d-zoom{display:block; width:100%; height:100%; cursor:ns-resize; touch-action:none;}
@@ -292,7 +292,7 @@
      sitting above this box without it overlapping the tempo readout above —
      the flex gap from .speedbox alone (14px) isn't enough on its own. */
   .pitch-wrap{position:relative; margin-top:10px;}
-  .pitch-track{position:relative; width:38px; height:182px;}
+  .pitch-track{position:relative; width:38px; height:142px;}
   .pitch-track::before{
     content:""; position:absolute; left:50%; top:6px; bottom:6px; width:4px;
     transform:translateX(-50%); background:var(--bg); border:1px solid var(--border); border-radius:2px;
@@ -302,7 +302,7 @@
     transform:translate(-50%,-50%); background:var(--muted); pointer-events:none;
   }
   .pitch-track input[type=range]{
-    position:absolute; top:50%; left:50%; width:182px; height:38px; z-index:1;
+    position:absolute; top:50%; left:50%; width:142px; height:38px; z-index:1;
     transform:translate(-50%,-50%) rotate(90deg);
     -webkit-appearance:none; appearance:none; background:transparent; margin:0; touch-action:none;
   }
@@ -333,7 +333,7 @@
      equals pitch-track's (38x132), so centering here lines up with it. */
   .pitch-wrap::before{
     content:''; position:absolute; left:50%; top:50%;
-    width:33.5px; height:184px; transform:translate(-50%,-50%);
+    width:33.5px; height:144px; transform:translate(-50%,-50%);
     border:1px solid var(--muted); border-radius:2px; pointer-events:none;
   }
   /* Tempo reset — a small circular button (same style/size as the mixer's
@@ -425,41 +425,39 @@
      column families (EQ, fader, center) still bottom out level: EQ column
      4*69 + 3*3 = 285; fader column 69 + 3 + 213 = 285; center column
      69 + 3 + 156(meter, shrunk to absorb the rest) + 3 + 54(xfrow) = 285. */
-  .mx-center-col{display:flex; flex-direction:column; align-items:center; gap:3px; flex:none;}
-  .mx-col{display:flex; flex-direction:column; gap:3px; align-items:center; flex-shrink:0;}
+  .mx-center-col{display:flex; flex-direction:column; align-items:center; gap:2px; flex:none;}
+  .mx-col{display:flex; flex-direction:column; gap:2px; align-items:center; flex-shrink:0;}
   /* Outer meters (A/B) spread to the same width as the crossfader below
      them (120px), master meter stays centered between them. */
   .mx-metersrow{display:flex; justify-content:space-between; width:108px; align-items:flex-start; flex-shrink:0;}
 
-  /* Knobs scaled 1.3x then +12% more (30px->39px->44px, small 20px->26px->29px)
-     — knobgrp height scaled to match (48px->62px->69px). */
-  .mx-knobgrp{height:69px; flex-shrink:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;}
+  /* Knobs scaled 1.3x then +12% more (30px->39px->44px, small 20px->26px->29px),
+     then trimmed back down ~10% (44px->40px, small 29px->26px) as part of a
+     mixer height reduction — knobgrp height scaled to match (69px->62px). */
+  .mx-knobgrp{height:62px; flex-shrink:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;}
   .mx-knoblabel{font-size:8px; letter-spacing:.5px; color:var(--mx-ink-muted); text-transform:uppercase; font-weight:600;}
   .mx-knob{
-    flex-shrink:0; width:44px; height:44px; border-radius:50%; position:relative; cursor:ns-resize;
+    flex-shrink:0; width:40px; height:40px; border-radius:50%; position:relative; cursor:ns-resize;
     background:radial-gradient(circle at 35% 30%, #4a4a50, #1c1c1f 70%);
     border:1px solid #000; box-shadow:0 2px 3px rgba(0,0,0,.5), inset 0 0 0 1px rgba(255,255,255,.06);
     touch-action:none;
   }
-  .mx-knob.small{width:29px; height:29px;}
+  .mx-knob.small{width:26px; height:26px;}
   .mx-knob::after{
-    content:''; position:absolute; left:50%; top:5px; width:3px; height:16px;
-    background:#eef0f2; transform-origin:50% 17.5px;
+    content:''; position:absolute; left:50%; top:4px; width:3px; height:14px;
+    background:#eef0f2; transform-origin:50% 16px;
     transform:translateX(-50%) rotate(var(--deg,0deg)); border-radius:1px;
   }
-  .mx-knob.small::after{ top:3px; height:10px; transform-origin:50% 10px; }
+  .mx-knob.small::after{ top:3px; height:9px; transform-origin:50% 9px; }
 
   /* "Equalizer" = High+Mid+Low only (Trim is a separate, non-EQ control) —
-     3 knobgrps (69px, scaled) + 2 gaps (3px, from .mx-col) = 213px. Trim
-     and Master both sit in their own 69px top tier (Trim: first item of the
-     EQ column; Master: only item before the meters) — the fader starts
-     below that same 69px+3px gap tier, so fader top = High's top (not
-     Trim's). Meters are shorter than the fader on purpose — Master(69)+gap+
-     meters+gap+crossfader-block adds up to the same 285px total, so the
-     crossfader sits nested between the meters and the fader's own bottom
-     instead of spanning the full width below everything. */
+     3 knobgrps (62px) + 2 gaps (2px, from .mx-col) = 190px. Trim and Master
+     both sit in their own 62px top tier (Trim: first item of the EQ column;
+     Master: only item before the meters) — the fader starts below that same
+     62px+2px gap tier, so fader top = High's top (not Trim's). EQ/fader
+     column total: 4*62 + 3*2 = 254px. */
   .mx-topspacer{
-    height:69px; flex-shrink:0; display:flex; flex-direction:column;
+    height:62px; flex-shrink:0; display:flex; flex-direction:column;
     align-items:center; justify-content:center; gap:2px;
   }
   /* Momentary channel-kill: held down = fader (and audio) drop to zero,
@@ -480,9 +478,9 @@
   .mx-meter .mx-seg.on-y{background:var(--led-yellow);}
   .mx-meter .mx-seg.on-r{background:var(--led-red);}
 
-  .mx-fader-track{flex-shrink:0; width:28px; height:213px; position:relative;}
+  .mx-fader-track{flex-shrink:0; width:28px; height:190px; position:relative;}
   .mx-fader-track input[type=range]{
-    position:absolute; top:50%; left:50%; width:213px; height:28px;
+    position:absolute; top:50%; left:50%; width:190px; height:28px;
     transform:translate(-50%,-50%) rotate(-90deg); -webkit-appearance:none; appearance:none;
     background:transparent; margin:0; touch-action:none;
   }
@@ -772,7 +770,7 @@
       +     '<div class="d-modal-list"></div>'
       +   '</div>'
       + '</div>'
-      + '<div class="d-wave-wrap"><canvas class="d-wave"></canvas><div class="d-wave-loading">LOADING</div></div>'
+      + '<div class="d-wave-wrap"><canvas class="d-wave"></canvas><div class="d-wave-loading">LOADING...</div></div>'
       + '<div class="d-times"><span class="d-cur">0:00</span><span class="d-dur">-0:00</span></div>'
       + midRow;
   }
@@ -1483,7 +1481,7 @@
     }
 
     function addToList(url){
-      setStatus("Loading...", "");
+      setStatus("LOADING...", "");
       els.loadBtn.disabled = true;
       proxyFetch("/api/resolve", { url: url, client_id: clientId })
         .then(function(res){
@@ -1508,7 +1506,7 @@
     // used both for this deck's default startup track and whenever a
     // playlist row's A/B button targets this deck.
     function loadTrack(url){
-      setStatus("Loading...", "");
+      setStatus("LOADING...", "");
       proxyFetch("/api/resolve", { url: url, client_id: clientId })
         .then(function(track){
           if (track.kind !== "track") throw new Error("Unsupported link (not a track)");
