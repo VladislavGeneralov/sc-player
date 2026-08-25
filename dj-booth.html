@@ -372,7 +372,7 @@
     background:linear-gradient(180deg,var(--metal-hi) 0%, var(--metal) 45%, var(--metal-low) 100%);
     border:1px solid var(--mx-black); border-radius:2px;
     box-shadow:0 10px 24px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.5);
-    padding:8px 8px 16px; width:100%; max-width:480px; margin:0 auto; overflow:hidden;
+    padding:8px 8px 8px; width:100%; max-width:480px; margin:0 auto; overflow:hidden;
   }
   /* CSS Grid instead of nested flex boxes — needed to make the crossfader's
      width an exact function of the fader columns' positions (grid-column
@@ -470,7 +470,7 @@
   .mx-topbtn.active{background:var(--accent); color:#fff;}
   .mx-tri{display:inline-block; transform:translateY(1px);}
   .mx-meter{
-    flex-shrink:0; display:flex; flex-direction:column-reverse; gap:2px; height:148px; width:8px;
+    flex-shrink:0; display:flex; flex-direction:column-reverse; gap:2px; height:110px; width:8px;
     background:var(--mx-groove); border-radius:2px; padding:3px 0; border:1px solid #000;
   }
   .mx-meter .mx-seg{flex:1; border-radius:1px; background:#101012;}
@@ -527,12 +527,11 @@
 
   /* Nested in the center column now, below the meters — its width is its
      own (not tied to the fader columns), narrow enough to sit clearly
-     between them rather than spanning toward either one. margin-top gives
-     it breathing room away from the meters above and nudges it down a
-     little further still — the center column now runs slightly past the
-     EQ/fader columns' bottom edge rather than lining up flush with them,
-     traded deliberately for the crossfader's own position. */
-  .mx-xfrow{display:flex; flex-direction:column; align-items:center; gap:4px; margin-top:16px;}
+     between them rather than spanning toward either one. Pulled back up
+     close to the (now shorter) meters — margin-top trimmed way down from
+     its earlier "nudge it lower" value, as part of shaving more height off
+     the mixer overall. */
+  .mx-xfrow{display:flex; flex-direction:column; align-items:center; gap:4px; margin-top:4px;}
   .mx-xftrack{position:relative; width:110px; height:38px;}
   .mx-xftrack input[type=range]{
     width:100%; height:38px; -webkit-appearance:none; appearance:none; background:transparent; margin:0; touch-action:none;
