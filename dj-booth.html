@@ -301,8 +301,11 @@
     content:""; position:absolute; left:50%; top:50%; width:16px; height:2px;
     transform:translate(-50%,-50%); background:var(--muted); pointer-events:none;
   }
+  /* height (the fader's grab thickness, pre-rotation) is a bit bigger than
+     the visible track (38px) — same absolute+centered trick as the mixer
+     faders, so it doesn't touch layout. */
   .pitch-track input[type=range]{
-    position:absolute; top:50%; left:50%; width:142px; height:38px; z-index:1;
+    position:absolute; top:50%; left:50%; width:142px; height:48px; z-index:1;
     transform:translate(-50%,-50%) rotate(90deg);
     -webkit-appearance:none; appearance:none; background:transparent; margin:0; touch-action:none;
   }
@@ -325,6 +328,10 @@
       #eef0f2 calc(50% - 1px), #eef0f2 calc(50% + 1px),
       #161618 calc(50% + 1px), #161618 100%);
     box-shadow:0 1px 2px rgba(0,0,0,.6); cursor:pointer;
+  }
+  .pitch-track input[type=range].is-dragging::-webkit-slider-thumb,
+  .pitch-track input[type=range].is-dragging::-moz-range-thumb{
+    box-shadow:0 0 0 3px rgba(255,85,0,.35), 0 0 8px rgba(255,85,0,.4), 0 1px 2px rgba(0,0,0,.6);
   }
   /* Gray frame around the fader's whole working area (its full travel
      length), not around the moving cap — width matches the cap's own
@@ -425,8 +432,12 @@
      column families (EQ, fader, center) still bottom out level: EQ column
      4*69 + 3*3 = 285; fader column 69 + 3 + 213 = 285; center column
      69 + 3 + 156(meter, shrunk to absorb the rest) + 3 + 54(xfrow) = 285. */
-  .mx-center-col{display:flex; flex-direction:column; align-items:center; gap:2px; flex:none;}
-  .mx-col{display:flex; flex-direction:column; gap:2px; align-items:center; flex-shrink:0;}
+  /* gap (not margin on a specific child) so master->meters and
+     meters->crossfader get the same spacing automatically — center column
+     total (62+11+110+11+53=247) stays just under the EQ/fader reference
+     height (248), so the mixer's own overall height is unaffected. */
+  .mx-center-col{display:flex; flex-direction:column; align-items:center; gap:11px; flex:none;}
+  .mx-col{display:flex; flex-direction:column; gap:0; align-items:center; flex-shrink:0;}
   /* Outer meters (A/B) spread to the same width as the crossfader below
      them (120px), master meter stays centered between them. */
   .mx-metersrow{display:flex; justify-content:space-between; width:108px; align-items:flex-start; flex-shrink:0;}
@@ -442,7 +453,20 @@
     border:1px solid #000; box-shadow:0 2px 3px rgba(0,0,0,.5), inset 0 0 0 1px rgba(255,255,255,.06);
     touch-action:none;
   }
+  /* Soft orange glow while actively held — same accent color as the ring
+     around CUE/PLAY, applied as an outer box-shadow so it follows the
+     knob's own circular shape. */
+  .mx-knob.is-dragging{
+    box-shadow:0 0 0 3px rgba(255,85,0,.35), 0 0 8px rgba(255,85,0,.4),
+      0 2px 3px rgba(0,0,0,.5), inset 0 0 0 1px rgba(255,255,255,.06);
+  }
   .mx-knob.small{width:26px; height:26px;}
+  /* Invisible hit-area extension — a pseudo-element sized bigger than the
+     knob itself, positioned outside its box. Pseudo-elements don't affect
+     their host's layout size (so the tight zero-gap EQ spacing is
+     untouched), but pointer events on them still bubble up to the knob's
+     own listeners, so a tap slightly off the visible circle still grabs it. */
+  .mx-knob::before{content:''; position:absolute; inset:-5px;}
   .mx-knob::after{
     content:''; position:absolute; left:50%; top:4px; width:3px; height:14px;
     background:#eef0f2; transform-origin:50% 16px;
@@ -451,11 +475,11 @@
   .mx-knob.small::after{ top:3px; height:9px; transform-origin:50% 9px; }
 
   /* "Equalizer" = High+Mid+Low only (Trim is a separate, non-EQ control) —
-     3 knobgrps (62px) + 2 gaps (2px, from .mx-col) = 190px. Trim and Master
-     both sit in their own 62px top tier (Trim: first item of the EQ column;
-     Master: only item before the meters) — the fader starts below that same
-     62px+2px gap tier, so fader top = High's top (not Trim's). EQ/fader
-     column total: 4*62 + 3*2 = 254px. */
+     3 knobgrps (62px) with no gap between them now (.mx-col gap:0) = 186px.
+     Trim and Master both sit in their own 62px top tier (Trim: first item
+     of the EQ column; Master: only item before the meters) — the fader
+     starts right below that 62px tier, so fader top = High's top (not
+     Trim's). EQ/fader column total: 4*62 = 248px. */
   .mx-topspacer{
     height:62px; flex-shrink:0; display:flex; flex-direction:column;
     align-items:center; justify-content:center; gap:2px;
@@ -478,9 +502,12 @@
   .mx-meter .mx-seg.on-y{background:var(--led-yellow);}
   .mx-meter .mx-seg.on-r{background:var(--led-red);}
 
-  .mx-fader-track{flex-shrink:0; width:28px; height:190px; position:relative;}
+  .mx-fader-track{flex-shrink:0; width:28px; height:186px; position:relative;}
+  /* The input's own box is the fader's actual grab area — made a bit wider
+     than the visible groove (.mx-fader-track's 28px) since it's absolutely
+     positioned and centered, so growing it doesn't touch layout at all. */
   .mx-fader-track input[type=range]{
-    position:absolute; top:50%; left:50%; width:190px; height:28px;
+    position:absolute; top:50%; left:50%; width:186px; height:40px;
     transform:translate(-50%,-50%) rotate(-90deg); -webkit-appearance:none; appearance:none;
     background:transparent; margin:0; touch-action:none;
   }
@@ -527,14 +554,19 @@
 
   /* Nested in the center column now, below the meters — its width is its
      own (not tied to the fader columns), narrow enough to sit clearly
-     between them rather than spanning toward either one. Pulled back up
-     close to the (now shorter) meters — margin-top trimmed way down from
-     its earlier "nudge it lower" value, as part of shaving more height off
-     the mixer overall. */
-  .mx-xfrow{display:flex; flex-direction:column; align-items:center; gap:4px; margin-top:4px;}
+     between them rather than spanning toward either one. No margin-top of
+     its own anymore — the space above it is the shared .mx-center-col gap,
+     same as the gap above the meters, so both transitions match. */
+  .mx-xfrow{display:flex; flex-direction:column; align-items:center; gap:4px;}
   .mx-xftrack{position:relative; width:110px; height:38px;}
+  /* Absolutely positioned + centered (same trick as the channel faders) so
+     the grab area (height) can be taller than the visible track without
+     affecting layout — width stays matched to the track so the thumb's own
+     value-mapping is unaffected. */
   .mx-xftrack input[type=range]{
-    width:100%; height:38px; -webkit-appearance:none; appearance:none; background:transparent; margin:0; touch-action:none;
+    position:absolute; top:50%; left:50%; width:110px; height:48px;
+    transform:translate(-50%,-50%);
+    -webkit-appearance:none; appearance:none; background:transparent; margin:0; touch-action:none;
   }
   .mx-xftrack::before{
     content:''; position:absolute; left:6px; right:6px; top:50%; height:4px; transform:translateY(-50%);
@@ -553,6 +585,20 @@
       #161618 calc(50% + 1px), #161618 100%);
   }
   .mx-xflabels{display:flex; justify-content:space-between; width:110px; font-size:9px; color:var(--mx-ink-muted); font-weight:700;}
+
+  /* Soft orange glow on whichever fader cap is actively being dragged.
+     Driven by a JS-toggled class (wireDragGlow), not :active — :active on a
+     native range input is unreliable for touch drags on some mobile
+     browsers (only reflects a held mouse button reliably), so the class is
+     toggled explicitly on pointerdown/up/cancel instead. */
+  .mx-fader-track input[type=range].is-dragging::-webkit-slider-thumb,
+  .mx-xftrack input[type=range].is-dragging::-webkit-slider-thumb{
+    box-shadow:0 0 0 3px rgba(255,85,0,.35), 0 0 8px rgba(255,85,0,.4), 0 1px 2px rgba(0,0,0,.6);
+  }
+  .mx-fader-track input[type=range].is-dragging::-moz-range-thumb,
+  .mx-xftrack input[type=range].is-dragging::-moz-range-thumb{
+    box-shadow:0 0 0 3px rgba(255,85,0,.35), 0 0 8px rgba(255,85,0,.4), 0 1px 2px rgba(0,0,0,.6);
+  }
 </style>
 </head>
 <body>
@@ -634,6 +680,14 @@
     var d = document.createElement("div");
     d.textContent = s == null ? "" : String(s);
     return d.innerHTML;
+  }
+  // Toggles .is-dragging on a native range input for the orange grab-glow —
+  // JS-driven rather than relying on :active, which doesn't reliably track
+  // touch drags on every mobile browser.
+  function wireDragGlow(el){
+    el.addEventListener("pointerdown", function(){ el.classList.add("is-dragging"); });
+    el.addEventListener("pointerup", function(){ el.classList.remove("is-dragging"); });
+    el.addEventListener("pointercancel", function(){ el.classList.remove("is-dragging"); });
   }
   function fmt(t){
     if (!isFinite(t) || t < 0) t = 0;
@@ -1173,6 +1227,7 @@
       els.speedVal.textContent = sign + percent.toFixed(1) + "%";
     }
     els.speed.addEventListener("input", function(){ setTempo(els.speed.value); });
+    wireDragGlow(els.speed);
     els.speedReset.addEventListener("click", function(){ els.speed.value = 0; setTempo(0); });
     applyPitchRange();
     setTempo(0);
@@ -1598,14 +1653,15 @@
     var dragging = false, startY = 0, startVal = 0;
     o.el.addEventListener("pointerdown", function(e){
       dragging = true; startY = e.clientY; startVal = value;
+      o.el.classList.add("is-dragging");
       o.el.setPointerCapture(e.pointerId); resumeCtx();
     });
     o.el.addEventListener("pointermove", function(e){
       if (!dragging) return;
       setValue(startVal + ((startY - e.clientY) / 150) * (o.max - o.min));
     });
-    o.el.addEventListener("pointerup", function(){ dragging = false; });
-    o.el.addEventListener("pointercancel", function(){ dragging = false; });
+    o.el.addEventListener("pointerup", function(){ dragging = false; o.el.classList.remove("is-dragging"); });
+    o.el.addEventListener("pointercancel", function(){ dragging = false; o.el.classList.remove("is-dragging"); });
     o.el.addEventListener("dblclick", function(){ setValue(o.def); });
     setValue(o.def);
   }
@@ -1623,7 +1679,9 @@
   }
   function buildFader(mountEl){
     mountEl.innerHTML = '<input type="range" min="0" max="1" step="0.001" value="1">';
-    return mountEl.querySelector("input");
+    var input = mountEl.querySelector("input");
+    wireDragGlow(input);
+    return input;
   }
   function buildMeterSegs(meterEl){
     for (var i=0;i<12;i++){ var seg = document.createElement("div"); seg.className = "mx-seg"; meterEl.appendChild(seg); }
@@ -1720,6 +1778,7 @@
     document.getElementById("eqColB"), document.getElementById("faderColB"), document.getElementById("meterB"));
 
   var xfEl = document.getElementById("crossfader");
+  wireDragGlow(xfEl);
   function applyCrossfader(pos){
     var angle = pos * Math.PI / 2;
     smoothSet(chA.xfade.gain, Math.cos(angle));
