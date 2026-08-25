@@ -200,7 +200,7 @@
   /* Height matched so the zoomcol (zoom-wrap + jogrow) bottoms out level
      with the PLAY button in the speedbox column beside it. */
   .d-zoom-wrap{
-    position:relative; height:275px; border-radius:8px; overflow:hidden;
+    position:relative; height:255px; border-radius:8px; overflow:hidden;
     background:var(--panel2); border:1px solid var(--border);
   }
   .d-zoom{display:block; width:100%; height:100%; cursor:ns-resize; touch-action:none;}
@@ -292,7 +292,7 @@
      sitting above this box without it overlapping the tempo readout above —
      the flex gap from .speedbox alone (14px) isn't enough on its own. */
   .pitch-wrap{position:relative; margin-top:10px;}
-  .pitch-track{position:relative; width:38px; height:142px;}
+  .pitch-track{position:relative; width:38px; height:122px;}
   .pitch-track::before{
     content:""; position:absolute; left:50%; top:6px; bottom:6px; width:4px;
     transform:translateX(-50%); background:var(--bg); border:1px solid var(--border); border-radius:2px;
@@ -305,7 +305,7 @@
      the visible track (38px) — same absolute+centered trick as the mixer
      faders, so it doesn't touch layout. */
   .pitch-track input[type=range]{
-    position:absolute; top:50%; left:50%; width:142px; height:48px; z-index:1;
+    position:absolute; top:50%; left:50%; width:122px; height:48px; z-index:1;
     transform:translate(-50%,-50%) rotate(90deg);
     -webkit-appearance:none; appearance:none; background:transparent; margin:0; touch-action:none;
   }
@@ -340,7 +340,7 @@
      equals pitch-track's (38x132), so centering here lines up with it. */
   .pitch-wrap::before{
     content:''; position:absolute; left:50%; top:50%;
-    width:33.5px; height:144px; transform:translate(-50%,-50%);
+    width:33.5px; height:124px; transform:translate(-50%,-50%);
     border:1px solid var(--muted); border-radius:2px; pointer-events:none;
   }
   /* Tempo reset — a small circular button (same style/size as the mixer's
@@ -365,7 +365,7 @@
     position:absolute; bottom:100%; left:50%; margin-bottom:4px;
     transform:translateX(-50%);
     width:20px; height:20px; padding:0; font-size:7px; line-height:1;
-    background:var(--panel2); color:var(--text); border:1px solid var(--border);
+    background:var(--panel2); color:var(--text); border:1px solid var(--accent);
     border-radius:50%; display:flex; align-items:center; justify-content:center;
   }
 
