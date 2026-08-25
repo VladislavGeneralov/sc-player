@@ -569,8 +569,13 @@
 
   // ---- Shared settings (client_id / API proxy base), used by both decks ----
   var DEFAULT_CLIENT_ID = "Pb72ranhoyt6gw7hM7TkzUItXlMWSNSo";
+  // Deployed Cloudflare Worker (worker.js) — the CORS proxy this page needs
+  // when it isn't served from the same origin as the local Node proxy
+  // (server.js). Baked in as a default so nobody has to paste it into
+  // settings by hand; still overridable there for a different deployment.
+  var DEFAULT_API_BASE = "https://scdj-proxy.ptntonesix.workers.dev";
   var clientId = localStorage.getItem("sc_client_id") || DEFAULT_CLIENT_ID;
-  var apiBase = localStorage.getItem("sc_api_base") || "";
+  var apiBase = localStorage.getItem("sc_api_base") || DEFAULT_API_BASE;
 
   var settingsBtn = document.getElementById("settingsBtn");
   var settingsPanel = document.getElementById("settingsPanel");
