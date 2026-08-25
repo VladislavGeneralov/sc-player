@@ -22,7 +22,17 @@
     box-sizing:border-box; -webkit-tap-highlight-color:transparent;
     -webkit-touch-callout:none; -webkit-user-drag:none;
   }
-  html{ overscroll-behavior:none; touch-action:manipulation; }
+  /* Themed scrollbar (page + any internal scroll area) instead of the OS/
+     browser default — Firefox via scrollbar-color (inherits down), WebKit/
+     Chromium need the same rule repeated on each actual scrolling element. */
+  html{
+    overscroll-behavior:none; touch-action:manipulation;
+    scrollbar-width:thin; scrollbar-color:var(--muted) var(--panel2);
+  }
+  html::-webkit-scrollbar{width:8px; height:8px;}
+  html::-webkit-scrollbar-track{background:var(--panel2);}
+  html::-webkit-scrollbar-thumb{background:var(--muted); border-radius:4px;}
+  html::-webkit-scrollbar-thumb:hover{background:var(--accent);}
   body{
     margin:0; background:#0a0b0d; color:var(--text);
     font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
@@ -80,31 +90,100 @@
      default view down to just that one small button + the title. Uses a
      .open class rather than [hidden] to toggle visibility (an element with
      an explicit `display` in author CSS silently defeats [hidden] otherwise). */
+  /* align-items:flex-start + a top padding roughly matching where the deck's
+     own horizontal waveform sits (booth padding 22 + deck padding 8 + toprow
+     26 + gap 6 ≈ 62px) — the modal starts around there instead of dead
+     center, and is taller overall (min-height) to leave room below the URL
+     row for a track list once playlist loading lands. */
   .d-modal-backdrop{
     display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:50;
-    align-items:center; justify-content:center; padding:24px;
+    align-items:flex-start; justify-content:center; padding:62px 24px 24px;
   }
   .d-modal-backdrop.open{display:flex;}
+  /* No min-height — the modal hugs its content (compact with nothing/a few
+     tracks loaded, taller with more), only capped by max-height once a big
+     playlist would otherwise overflow the viewport (that's when the list's
+     own flex:1+overflow-y:auto kicks in and it starts scrolling instead). */
   .d-modal{
     background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:12px;
     display:flex; flex-direction:column; gap:8px; width:min(90vw, 320px);
+    max-height:calc(100vh - 86px);
   }
+  .d-modal-header{flex:none; display:flex; align-items:center; justify-content:space-between; gap:8px;}
   .d-modal-label{
-    font-size:10px; letter-spacing:.5px; color:var(--muted); text-transform:uppercase;
-    display:flex; align-items:center; gap:5px;
+    font-size:8px; letter-spacing:.5px; color:var(--accent); text-transform:uppercase;
+    display:flex; align-items:center; gap:6px; white-space:nowrap;
   }
-  .d-modal-label img{width:14px; height:14px; display:block;}
-  .d-modal-row{display:flex; gap:5px;}
+  /* Spins slowly for as long as the modal is open (an element with
+     display:none — the closed backdrop's default — just pauses the
+     animation, so it's effectively "while the load modal is open"). */
+  @keyframes sc-spin{ from{transform:rotate(0deg);} to{transform:rotate(360deg);} }
+  .d-modal-label img{width:16px; height:16px; display:block; flex:none; animation:sc-spin 6s linear infinite;}
+  .d-modal-row{flex:none; display:flex; gap:5px;}
   .d-modal input{
     flex:1; min-width:0; background:var(--panel2); border:1px solid var(--border); color:var(--text);
     padding:8px 9px; border-radius:6px; font-size:12px; outline:none;
   }
   .d-modal input:focus{border-color:var(--accent);}
-  .d-modal .d-load{padding:0 14px; font-size:14px; font-weight:400; border-radius:6px;}
-  .d-modal-close{align-self:flex-end; background:transparent; border:none; color:var(--muted); font-size:13px; padding:2px 4px;}
+  .d-modal .d-load{
+    padding:0 14px; font-size:11px; font-weight:400; letter-spacing:.5px;
+    text-transform:uppercase; border-radius:6px;
+  }
+  .d-modal-close{flex:none; background:transparent; border:none; color:var(--muted); font-size:13px; padding:2px 4px;}
+  .d-modal-clear-row{flex:none; display:flex; gap:5px;}
+  .d-modal-clearbtn{
+    flex:1; background:var(--panel2); color:var(--muted);
+    border:1px solid var(--border); border-radius:3px; padding:3px 10px;
+    font-size:9px; font-weight:400; letter-spacing:.5px; text-transform:uppercase;
+  }
+  /* Playlist track list — the header/URL row above stay put (flex:none);
+     this is the only part that grows and scrolls once it's populated. */
+  .d-modal-list{
+    flex:1 1 auto; min-height:0; overflow-y:auto;
+    display:flex; flex-direction:column; gap:3px;
+    scrollbar-width:thin; scrollbar-color:var(--muted) var(--panel2);
+  }
+  .d-modal-list::-webkit-scrollbar{width:8px;}
+  .d-modal-list::-webkit-scrollbar-track{background:var(--panel2);}
+  .d-modal-list::-webkit-scrollbar-thumb{background:var(--muted); border-radius:4px;}
+  .d-modal-list::-webkit-scrollbar-thumb:hover{background:var(--accent);}
+  .d-modal-track{
+    flex:none; display:flex; align-items:center; justify-content:space-between; gap:8px;
+    width:100%; background:var(--panel2); border:1px solid var(--border); border-radius:6px;
+    padding:6px 9px; color:var(--text);
+  }
+  .d-modal-track-info{
+    display:flex; flex-direction:column; align-items:flex-start; gap:1px;
+    min-width:0; flex:1 1 auto;
+  }
+  .d-modal-track-title{
+    font-size:12px; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .d-modal-track-artist{font-size:10px; color:var(--muted);}
+  .d-modal-track-actions{flex:none; display:flex; align-items:center; gap:4px;}
+  /* A/B — which deck a click loads this track onto. The one matching this
+     modal's own deck is lit by default (orange), the other stays neutral. */
+  .d-modal-track-deck{
+    flex:none; width:20px; height:20px; padding:0; border-radius:50%;
+    font-size:9px; font-weight:700; background:var(--panel); color:var(--muted);
+    border:1px solid var(--border);
+  }
+  .d-modal-track-deck.is-this-deck{background:var(--accent); color:#2a1200; border-color:var(--accent);}
+  .d-modal-track-remove{
+    flex:none; width:20px; height:20px; padding:0; border-radius:50%;
+    font-size:10px; font-weight:400; background:transparent; color:var(--muted); border:none;
+  }
 
   .d-wave-wrap{position:relative; border-radius:6px; overflow:hidden; background:var(--panel2); border:1px solid var(--border); flex:none;}
   .d-wave{display:block; width:100%; height:16px; cursor:pointer; touch-action:none;}
+  /* Covers the overview waveform while a track streams+decodes in the
+     background — the load modal itself closes right away instead of
+     waiting, so this is the only sign a new track is still on its way. */
+  .d-wave-loading{
+    position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    font-size:9px; letter-spacing:1px; color:var(--muted); background:var(--panel2);
+  }
+  .d-wave-loading.show{display:flex;}
   .d-times{display:flex; justify-content:space-between; font-size:10px; color:var(--muted); font-variant-numeric:tabular-nums;}
   /* Last 30s of the track: the remaining-time readout blinks as a warning. */
   @keyframes durBlink{ 0%,49.9%{opacity:1;} 50%,100%{opacity:0;} }
@@ -113,12 +192,15 @@
   /* Pitch fader sits beside the zoom waveform, not above/below it — deck A
      has it on the left (outer edge), deck B on the right (outer edge), via
      DOM order (mirror flag), matching a twin-CDJ layout with faders flanking out. */
-  .d-midrow{display:flex; gap:16px; align-items:flex-start;}
+  /* Gap trimmed from 16 to 12 — part of fitting the deck pair's combined
+     width inside a ~375px phone viewport (modern-phone baseline) without
+     the jog buttons or anything else spilling past the deck's own edge. */
+  .d-midrow{display:flex; gap:12px; align-items:flex-start;}
   .d-zoomcol{flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:6px;}
   /* Height matched so the zoomcol (zoom-wrap + jogrow) bottoms out level
      with the PLAY button in the speedbox column beside it. */
   .d-zoom-wrap{
-    position:relative; height:275px; border-radius:8px; overflow:hidden;
+    position:relative; height:315px; border-radius:8px; overflow:hidden;
     background:var(--panel2); border:1px solid var(--border);
   }
   .d-zoom{display:block; width:100%; height:100%; cursor:ns-resize; touch-action:none;}
@@ -127,11 +209,11 @@
      set tempo on release. Sits right under the zoom waveform it affects.
      space-between (not center) + zoomcol's default align-items:stretch means
      the row is exactly as wide as the zoom-wave above it, so the buttons
-     land flush with its left/right edges, "JOG" filling the middle gap. */
+     land flush with its left/right edges. No label in between (it was
+     pushing the row wider than the waveform on narrow phone screens). */
   .d-jogrow{display:flex; gap:6px; justify-content:space-between; align-items:center;}
-  .d-jogrow .d-joglabel{font-size:9px; letter-spacing:1px; color:var(--muted);}
   .d-jog{
-    flex:none; width:42px; height:22px; padding:0; border-radius:6px;
+    flex:none; width:36px; height:22px; padding:0; border-radius:6px;
     background:var(--panel2); border:1px solid var(--border); color:var(--text);
     display:flex; align-items:center; justify-content:center; gap:3px;
   }
@@ -195,8 +277,11 @@
   .speedbox:not(.mirror){ margin-left:-6px; }
   .speedbox.mirror{ margin-right:-6px; }
   /* Fixed width sized for the widest possible reading (WIDE ±100% range,
-     e.g. "-100.0%") so the tempo readout never reflows the layout as it changes. */
-  .speedval{font-size:11px; font-weight:400; font-variant-numeric:tabular-nums; min-width:80px; text-align:center;}
+     e.g. "-100.0%") so the tempo readout never reflows the layout as it changes.
+     Trimmed from 80 to 62 — part of fitting the deck pair inside a ~375px
+     phone viewport (modern-phone baseline); still comfortably fits "-100.0%"
+     at this font-size. */
+  .speedval{font-size:11px; font-weight:400; font-variant-numeric:tabular-nums; min-width:62px; text-align:center;}
   /* Track's own box only — no flex-row with the reset button anymore, so
      the track's center always lands on the same vertical line as CUE/PLAY/
      the tempo readout, regardless of the reset button's placement. The
@@ -207,7 +292,7 @@
      sitting above this box without it overlapping the tempo readout above —
      the flex gap from .speedbox alone (14px) isn't enough on its own. */
   .pitch-wrap{position:relative; margin-top:10px;}
-  .pitch-track{position:relative; width:38px; height:142px;}
+  .pitch-track{position:relative; width:38px; height:182px;}
   .pitch-track::before{
     content:""; position:absolute; left:50%; top:6px; bottom:6px; width:4px;
     transform:translateX(-50%); background:var(--bg); border:1px solid var(--border); border-radius:2px;
@@ -217,7 +302,7 @@
     transform:translate(-50%,-50%); background:var(--muted); pointer-events:none;
   }
   .pitch-track input[type=range]{
-    position:absolute; top:50%; left:50%; width:142px; height:38px; z-index:1;
+    position:absolute; top:50%; left:50%; width:182px; height:38px; z-index:1;
     transform:translate(-50%,-50%) rotate(90deg);
     -webkit-appearance:none; appearance:none; background:transparent; margin:0; touch-action:none;
   }
@@ -248,7 +333,7 @@
      equals pitch-track's (38x132), so centering here lines up with it. */
   .pitch-wrap::before{
     content:''; position:absolute; left:50%; top:50%;
-    width:33.5px; height:144px; transform:translate(-50%,-50%);
+    width:33.5px; height:184px; transform:translate(-50%,-50%);
     border:1px solid var(--muted); border-radius:2px; pointer-events:none;
   }
   /* Tempo reset — a small circular button (same style/size as the mixer's
@@ -304,9 +389,13 @@
      left edge and column 5 flush to its right edge (extra space distributed
      between the tracks instead), which is what actually lines them up with
      the deck's flex-start/flex-end-anchored CUE/PLAY column. */
+  /* column-gap shrunk from 30 to 14 (matches row-gap) — sized so the whole
+     grid's content width (EQ+fader+center+fader+EQ + 4 gaps) fits inside a
+     ~375px-wide phone viewport (modern-phone baseline) without the mixer's
+     own overflow:hidden clipping anything off the right edge. */
   .mx-grid{
     display:grid; grid-template-columns:auto auto auto auto auto;
-    column-gap:30px; row-gap:14px; justify-content:space-between; align-items:start;
+    column-gap:14px; row-gap:14px; justify-content:space-between; align-items:start;
   }
   /* EQ columns get a min-width matching the deck's CUE/PLAY column (56px,
      the width of those circular buttons) so that — since both are centered
@@ -340,7 +429,7 @@
   .mx-col{display:flex; flex-direction:column; gap:3px; align-items:center; flex-shrink:0;}
   /* Outer meters (A/B) spread to the same width as the crossfader below
      them (120px), master meter stays centered between them. */
-  .mx-metersrow{display:flex; justify-content:space-between; width:120px; align-items:flex-start; flex-shrink:0;}
+  .mx-metersrow{display:flex; justify-content:space-between; width:108px; align-items:flex-start; flex-shrink:0;}
 
   /* Knobs scaled 1.3x then +12% more (30px->39px->44px, small 20px->26px->29px)
      — knobgrp height scaled to match (48px->62px->69px). */
@@ -446,7 +535,7 @@
      EQ/fader columns' bottom edge rather than lining up flush with them,
      traded deliberately for the crossfader's own position. */
   .mx-xfrow{display:flex; flex-direction:column; align-items:center; gap:4px; margin-top:16px;}
-  .mx-xftrack{position:relative; width:122px; height:38px;}
+  .mx-xftrack{position:relative; width:110px; height:38px;}
   .mx-xftrack input[type=range]{
     width:100%; height:38px; -webkit-appearance:none; appearance:none; background:transparent; margin:0; touch-action:none;
   }
@@ -466,7 +555,7 @@
       #eef0f2 calc(50% - 1px), #eef0f2 calc(50% + 1px),
       #161618 calc(50% + 1px), #161618 100%);
   }
-  .mx-xflabels{display:flex; justify-content:space-between; width:122px; font-size:9px; color:var(--mx-ink-muted); font-weight:700;}
+  .mx-xflabels{display:flex; justify-content:space-between; width:110px; font-size:9px; color:var(--mx-ink-muted); font-weight:700;}
 </style>
 </head>
 <body>
@@ -529,17 +618,26 @@
 (function(){
   "use strict";
 
-  // Real SoundCloud brand mark (their own iOS touch-icon asset), embedded as a
-  // data URI so the page stays self-contained — used both as the tab favicon
-  // and next to the URL-paste label in the load modal.
-  var SC_ICON_DATA_URI = "data:image/png;base64,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";
+  // Black-on-transparent SoundCloud glyph (user-supplied, genuinely
+  // transparent — resized down from a 512x512 source), used as the tab
+  // favicon (rotated 180) and next to the URL-paste label in the load
+  // modal (unrotated).
+  var SC_ICON_DATA_URI = "data:image/png;base64,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";
+  var SC_ICON_180_DATA_URI = "data:image/png;base64,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";
   (function setFavicon(){
     var link = document.createElement("link");
-    link.rel = "icon"; link.type = "image/png"; link.href = SC_ICON_DATA_URI;
+    link.rel = "icon"; link.type = "image/png"; link.href = SC_ICON_180_DATA_URI;
     document.head.appendChild(link);
   })();
 
   function clamp(v, lo, hi){ return Math.min(hi, Math.max(lo, v)); }
+  // Track/playlist titles come from SoundCloud (untrusted) and get inserted
+  // as innerHTML in the playlist list — must escape before that.
+  function escapeHtml(s){
+    var d = document.createElement("div");
+    d.textContent = s == null ? "" : String(s);
+    return d.innerHTML;
+  }
   function fmt(t){
     if (!isFinite(t) || t < 0) t = 0;
     var m = Math.floor(t/60), s = Math.floor(t%60);
@@ -641,7 +739,6 @@
       +   '<div class="d-zoom-wrap"><canvas class="d-zoom"></canvas></div>'
       +   '<div class="d-jogrow">'
       +     '<button class="d-jog d-jogback"><span class="d-chev d-chev-l"></span><span class="d-chev d-chev-l"></span></button>'
-      +     '<span class="d-joglabel">JOG</span>'
       +     '<button class="d-jog d-jogfwd"><span class="d-chev d-chev-r"></span><span class="d-chev d-chev-r"></span></button>'
       +   '</div>'
       + '</div>';
@@ -657,18 +754,33 @@
       + '</div>'
       + '<div class="d-modal-backdrop">'
       +   '<div class="d-modal">'
-      +     '<button class="d-modal-close">✕</button>'
-      +     '<div class="d-modal-label"><img src="' + SC_ICON_DATA_URI + '" alt=""> Paste SoundCloud URL</div>'
+      +     '<div class="d-modal-header">'
+      +       '<div class="d-modal-label">'
+      +         '<img src="' + SC_ICON_DATA_URI + '" alt="">'
+      +         '<span>Paste SoundCloud URL to load track or playlist</span>'
+      +       '</div>'
+      +       '<button class="d-modal-close">✕</button>'
+      +     '</div>'
       +     '<div class="d-modal-row">'
       +       '<input type="url" class="d-url" placeholder="soundcloud.com/artist/track">'
-      +       '<button class="d-load">Upload</button>'
+      +       '<button class="d-load">ADD</button>'
       +     '</div>'
+      +     '<div class="d-modal-clear-row">'
+      +       '<button type="button" class="d-modal-clearbtn d-modal-clearurl">Clear URL</button>'
+      +       '<button type="button" class="d-modal-clearbtn d-modal-clearlist">Clear Playlist</button>'
+      +     '</div>'
+      +     '<div class="d-modal-list"></div>'
       +   '</div>'
       + '</div>'
-      + '<div class="d-wave-wrap"><canvas class="d-wave"></canvas></div>'
+      + '<div class="d-wave-wrap"><canvas class="d-wave"></canvas><div class="d-wave-loading">LOADING</div></div>'
       + '<div class="d-times"><span class="d-cur">0:00</span><span class="d-dur">-0:00</span></div>'
       + midRow;
   }
+
+  // Registry so one deck's playlist row can tell the OTHER deck to load a
+  // track (the A/B buttons next to each list entry) — filled in as each
+  // deck finishes constructing itself, read only later at click-time.
+  var decks = {};
 
   function createDeck(opts){
     var root = opts.root;
@@ -677,9 +789,10 @@
 
     var els = {
       linkBtn: $(".d-linkbtn"), modalBackdrop: $(".d-modal-backdrop"),
-      modalClose: $(".d-modal-close"),
+      modalClose: $(".d-modal-close"), modalList: $(".d-modal-list"),
+      modalClear: $(".d-modal-clearurl"), modalClearPlaylist: $(".d-modal-clearlist"),
       url: $(".d-url"), loadBtn: $(".d-load"), title: $(".d-title"),
-      wave: $(".d-wave"), zoomWave: $(".d-zoom"),
+      wave: $(".d-wave"), zoomWave: $(".d-zoom"), waveLoading: $(".d-wave-loading"),
       curTime: $(".d-cur"), durTime: $(".d-dur"),
       playBtn: $(".d-play"), cueBtn: $(".d-cue"),
       speed: $(".d-speed"), speedVal: $(".d-speedval"),
@@ -689,12 +802,18 @@
 
     function openLoadModal(){
       els.url.value = ""; // always start blank; closing with × never touches the loaded track
+      // A previously-resolved playlist list stays put across close/reopen —
+      // it only clears in loadTrack() once a genuinely new URL is submitted.
       els.modalBackdrop.classList.add("open");
       els.url.focus();
     }
     function closeLoadModal(){ els.modalBackdrop.classList.remove("open"); }
     els.linkBtn.addEventListener("click", openLoadModal);
     els.modalClose.addEventListener("click", closeLoadModal);
+    els.modalClear.addEventListener("click", function(){
+      els.url.value = "";
+      els.url.focus();
+    });
     els.modalBackdrop.addEventListener("pointerdown", function(e){
       if (e.target === els.modalBackdrop) closeLoadModal();
     });
@@ -1288,12 +1407,111 @@
       });
     }
 
-    function loadTrack(url){
+    // Clicking a track in a resolved playlist just calls loadTrack() again
+    // with that track's own URL — reuses the exact same single-track path.
+    // ADD never plays anything itself — it just resolves a track/playlist
+    // and drops the result(s) at the top of this deck's own list. Actually
+    // loading a listed track onto a deck happens later, via that row's own
+    // A/B button (loadTrack(), below) — which can target either deck.
+    var playlistItems = [];
+    var listGen = 0; // bumped on Clear Playlist so a stale background fill can't resurrect cleared rows
+
+    function renderPlaylist(){
+      els.modalList.innerHTML = playlistItems.map(function(t, idx){
+        var artist = (t.user && t.user.username) || "";
+        var title = t.title || ("Track #" + t.id);
+        return '<div class="d-modal-track" data-idx="' + idx + '">'
+          +   '<div class="d-modal-track-info">'
+          +     '<span class="d-modal-track-title">' + escapeHtml(title) + '</span>'
+          +     (artist ? '<span class="d-modal-track-artist">' + escapeHtml(artist) + '</span>' : '')
+          +   '</div>'
+          +   '<div class="d-modal-track-actions">'
+          +     '<button type="button" class="d-modal-track-deck' + (opts.id === "A" ? ' is-this-deck' : '') + '" data-deck="A">A</button>'
+          +     '<button type="button" class="d-modal-track-deck' + (opts.id === "B" ? ' is-this-deck' : '') + '" data-deck="B">B</button>'
+          +     '<button type="button" class="d-modal-track-remove">✕</button>'
+          +   '</div>'
+          + '</div>';
+      }).join("");
+    }
+    els.modalList.addEventListener("click", function(e){
+      var row = e.target.closest(".d-modal-track");
+      if (!row) return;
+      var idx = parseInt(row.getAttribute("data-idx"), 10);
+      var track = playlistItems[idx];
+      if (!track) return;
+      if (e.target.closest(".d-modal-track-remove")){
+        playlistItems.splice(idx, 1);
+        renderPlaylist();
+        return;
+      }
+      var deckBtn = e.target.closest(".d-modal-track-deck");
+      if (deckBtn){
+        var target = decks[deckBtn.getAttribute("data-deck")];
+        if (target && track.permalink_url) target.loadTrack(track.permalink_url);
+      }
+    });
+    els.modalClearPlaylist.addEventListener("click", function(){
+      playlistItems = [];
+      listGen++;
+      renderPlaylist();
+    });
+
+    // Large playlists come back from /api/resolve with only the first
+    // handful of tracks fully populated — the rest are truncated to just an
+    // id. Batch-fetch the missing ones (chunked — SoundCloud's batch
+    // endpoint doesn't take unlimited ids in one request) and merge them in.
+    var TRACKS_BATCH_SIZE = 50;
+    function fillMissingTrackData(){
+      var myGen = listGen;
+      var stubs = playlistItems.filter(function(t){ return !t.permalink_url || !t.title; });
+      if (!stubs.length) return;
+      var ids = stubs.map(function(t){ return t.id; });
+      var chunks = [];
+      for (var i = 0; i < ids.length; i += TRACKS_BATCH_SIZE) chunks.push(ids.slice(i, i + TRACKS_BATCH_SIZE));
+      Promise.all(chunks.map(function(chunk){
+        return proxyFetch("/api/tracks", { ids: chunk.join(","), client_id: clientId }).catch(function(){ return []; });
+      })).then(function(results){
+        if (myGen !== listGen) return; // list was cleared/replaced meanwhile
+        var full = {};
+        results.forEach(function(r){
+          var arr = Array.isArray(r) ? r : (r && r.collection) || [];
+          arr.forEach(function(t){ full[t.id] = t; });
+        });
+        playlistItems = playlistItems.map(function(t){ return full[t.id] || t; });
+        renderPlaylist();
+      });
+    }
+
+    function addToList(url){
       setStatus("Loading...", "");
       els.loadBtn.disabled = true;
       proxyFetch("/api/resolve", { url: url, client_id: clientId })
+        .then(function(res){
+          if (res.kind === "playlist"){
+            playlistItems = (res.tracks || []).concat(playlistItems);
+            setStatus(res.title ? ("Playlist: " + res.title) : "Playlist", "");
+          } else if (res.kind === "track"){
+            playlistItems.unshift(res);
+            var artist = (res.user && res.user.username) || "";
+            setStatus((res.title || "—") + (artist ? " — " + artist : ""), "ok");
+          } else {
+            throw new Error("Unsupported link (not a track or playlist)");
+          }
+          renderPlaylist();
+          fillMissingTrackData();
+        })
+        .catch(function(err){ setStatus("Error: " + err.message, "err"); })
+        .finally(function(){ els.loadBtn.disabled = false; });
+    }
+
+    // Resolves+streams+decodes+plays a single track on THIS deck right now —
+    // used both for this deck's default startup track and whenever a
+    // playlist row's A/B button targets this deck.
+    function loadTrack(url){
+      setStatus("Loading...", "");
+      proxyFetch("/api/resolve", { url: url, client_id: clientId })
         .then(function(track){
-          if (track.kind !== "track") throw new Error("Not a track (playlists aren't supported)");
+          if (track.kind !== "track") throw new Error("Unsupported link (not a track)");
           var transcodings = (track.media && track.media.transcodings) || [];
           var t = transcodings.find(function(x){ return x.format && x.format.protocol === "progressive"; })
                || transcodings.find(function(x){ return x.format && x.format.protocol === "hls"; });
@@ -1307,17 +1525,23 @@
           });
         })
         .then(function(res){
+          // Don't make the user wait for the stream to actually finish
+          // downloading/decoding before they get their modal back — close it
+          // now and show a LOADING placeholder over the overview waveform
+          // instead, right where the real one will appear once it's ready.
           setStatus("LOADING...", "");
+          closeLoadModal();
+          els.waveLoading.classList.add("show");
           return fetch(res.streamUrl)
             .then(function(r){ return r.arrayBuffer(); })
             .then(function(buf){ resumeCtx(); return audioCtx.decodeAudioData(buf); })
             .then(function(buffer){ return { track: res.track, waveform: res.waveform, buffer: buffer }; });
         })
         .then(function(res){
+          els.waveLoading.classList.remove("show");
           currentTrackKey = String(res.track.id);
           var artist = (res.track.user && res.track.user.username) || "";
           setStatus((res.track.title || "—") + (artist ? " — " + artist : ""), "ok");
-          closeLoadModal();
 
           stopNode(); state = "stopped"; pausedPosition = 0;
           // Every load always cues to 0 — no cross-session memory, so a cue
@@ -1332,13 +1556,15 @@
           updateTimeDisplay();
           renderTransportUI(); drawWave(); drawZoom();
         })
-        .catch(function(err){ setStatus("Error: " + err.message, "err"); })
-        .finally(function(){ els.loadBtn.disabled = false; });
+        .catch(function(err){
+          els.waveLoading.classList.remove("show");
+          setStatus("Error: " + err.message, "err");
+        });
     }
 
     els.loadBtn.addEventListener("click", function(){
       var v = els.url.value.trim();
-      if (v) loadTrack(v);
+      if (v) addToList(v);
     });
     els.url.addEventListener("keydown", function(e){
       if (e.key === "Enter") els.loadBtn.click();
@@ -1347,6 +1573,7 @@
     els.url.value = opts.defaultTrackUrl;
     loadTrack(opts.defaultTrackUrl);
 
+    decks[opts.id] = { loadTrack: loadTrack };
     return { output: gainNode };
   }
 

@@ -51,6 +51,17 @@ export default {
       return proxyJson(mediaUrl + sep + "client_id=" + encodeURIComponent(clientId));
     }
 
+    // Batch-fetches full track objects by id — large playlists come back
+    // from /api/resolve with only the first few tracks fully populated, the
+    // rest truncated to just an id; this fills those in.
+    if (url.pathname === "/api/tracks") {
+      const ids = url.searchParams.get("ids");
+      const clientId = url.searchParams.get("client_id");
+      if (!ids || !clientId) return jsonResponse({ error: "Missing ids or client_id" }, 400);
+      const target = "https://api-v2.soundcloud.com/tracks?ids=" + encodeURIComponent(ids) + "&client_id=" + encodeURIComponent(clientId);
+      return proxyJson(target);
+    }
+
     return jsonResponse({ error: "Not found" }, 404);
   },
 };
