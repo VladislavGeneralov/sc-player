@@ -191,6 +191,10 @@
   }
   .d-wave-loading.show{display:flex;}
   .d-times{display:flex; justify-content:space-between; font-size:10px; color:var(--muted); font-variant-numeric:tabular-nums;}
+  /* Both decks' analyzed BPM (each pitch-adjusted), sitting between the
+     current-time and remaining-time readouts. Clickable — toggles a beat
+     grid overlay on this deck's own vertical waveform. */
+  .d-bpm{color:var(--accent); cursor:pointer;}
   /* Last 30s of the track: the remaining-time readout blinks as a warning. */
   @keyframes durBlink{ 0%,49.9%{opacity:1;} 50%,100%{opacity:0;} }
   .d-dur.blink-warn{ color:var(--bad); animation:durBlink 1s linear infinite; }
@@ -696,6 +700,75 @@
     return m + ":" + (s<10?"0":"") + s;
   }
 
+  // ---- BPM analysis, off the main thread ----
+  // Runs in a Worker (source built as a string + Blob URL, so the whole app
+  // stays one file) so a slow analysis on a long track can never delay or
+  // stutter playback — decoding/scheduling audio doesn't wait on it at all.
+  // Energy-envelope autocorrelation: simple and fast enough (a few hundred
+  // ms even on a 6-minute track) without needing an FFT library; folds
+  // obviously-wrong octave results (half/double tempo) into a plausible
+  // dance-music range as a cheap correction.
+  var BPM_WORKER_SRC = [
+    "function detectBpm(samples, sampleRate){",
+    "  var blockSize = Math.max(1, Math.round(sampleRate * 0.01));",
+    "  var numBlocks = Math.floor(samples.length / blockSize);",
+    "  if (numBlocks < 10) return null;",
+    "  var envelope = new Float32Array(numBlocks);",
+    "  for (var i = 0; i < numBlocks; i++){",
+    "    var sum = 0, start = i * blockSize;",
+    "    for (var j = 0; j < blockSize; j++){ var v = samples[start + j]; sum += v * v; }",
+    "    envelope[i] = Math.sqrt(sum / blockSize);",
+    "  }",
+    "  var diff = new Float32Array(numBlocks);",
+    "  for (var i = 1; i < numBlocks; i++){ var d = envelope[i] - envelope[i-1]; diff[i] = d > 0 ? d : 0; }",
+    "  var envRate = 1 / 0.01;",
+    "  var minBpm = 60, maxBpm = 200;",
+    "  var minLag = Math.round(envRate * 60 / maxBpm);",
+    "  var maxLag = Math.round(envRate * 60 / minBpm);",
+    "  var bestLag = minLag, bestScore = -Infinity;",
+    "  for (var lag = minLag; lag <= maxLag; lag++){",
+    "    var score = 0;",
+    "    for (var i = 0; i + lag < numBlocks; i++) score += diff[i] * diff[i + lag];",
+    "    if (score > bestScore){ bestScore = score; bestLag = lag; }",
+    "  }",
+    "  var bpm = 60 * envRate / bestLag;",
+    "  while (bpm < 90) bpm *= 2;",
+    "  while (bpm > 180) bpm /= 2;",
+    "  return bpm;",
+    "}",
+    "self.onmessage = function(e){",
+    "  var bpm = detectBpm(e.data.samples, e.data.sampleRate);",
+    "  self.postMessage({ id: e.data.id, bpm: bpm });",
+    "};",
+  ].join("\n");
+  var bpmWorker = new Worker(URL.createObjectURL(new Blob([BPM_WORKER_SRC], { type: "application/javascript" })));
+  var bpmReqId = 0;
+  var bpmCallbacks = {};
+  bpmWorker.onmessage = function(e){
+    var cb = bpmCallbacks[e.data.id];
+    if (cb){ delete bpmCallbacks[e.data.id]; cb(e.data.bpm); }
+  };
+  // Analyzes up to ~90s from the middle of the track (skipping a likely
+  // intro) — bounds the work for long tracks without needing the whole file.
+  function analyzeBpmAsync(buffer){
+    return new Promise(function(resolve){
+      var sr = buffer.sampleRate;
+      var totalLen = buffer.length;
+      var maxSamples = Math.min(totalLen, Math.round(sr * 90));
+      var startSample = Math.min(Math.max(0, Math.round(sr * 20)), Math.max(0, totalLen - maxSamples));
+      var ch0 = buffer.getChannelData(0);
+      var ch1 = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : null;
+      var mono = new Float32Array(maxSamples);
+      for (var i = 0; i < maxSamples; i++){
+        var s = startSample + i;
+        mono[i] = ch1 ? (ch0[s] + ch1[s]) / 2 : ch0[s];
+      }
+      var id = ++bpmReqId;
+      bpmCallbacks[id] = resolve;
+      bpmWorker.postMessage({ id: id, samples: mono, sampleRate: sr }, [mono.buffer]);
+    });
+  }
+
   // Single AudioContext for the whole page — both decks and the mixer graph
   // must share one context, since Web Audio nodes can't be connected across
   // contexts. Created immediately (starts "suspended" until a user gesture).
@@ -764,6 +837,11 @@
   // api-v2, no proxy involved) for that specific label's content.
   var DEFAULT_TRACK_URL_A = "https://on.soundcloud.com/00Md0tX9TcGTcTSj6h";
   var DEFAULT_TRACK_URL_B = "https://on.soundcloud.com/PBUHGBPECoUT9U7ORb";
+  // Earlier defaults — kept out of the actual startup playback slots but
+  // still seeded into both decks' playlists on load, alongside the two
+  // above, so returning users still see all four familiar tracks.
+  var OLD_TRACK_URL_A = "https://soundcloud.com/recordeep-mag/premiere-unknown-artist-untitled-01-uknwn01?in_system_playlist=personalized-tracks%3A%3Ahooletronica%3A652496882";
+  var OLD_TRACK_URL_B = "https://soundcloud.com/peardublin/new-members-soma-pear005?in_system_playlist=personalized-tracks%3A%3Ahooletronica%3A652496882";
 
   // =========================================================================
   // Deck factory — one Pioneer-CDJ-style deck (Web Audio playback engine:
@@ -842,7 +920,7 @@
       +   '</div>'
       + '</div>'
       + '<div class="d-wave-wrap"><canvas class="d-wave"></canvas><div class="d-wave-loading">LOADING...</div></div>'
-      + '<div class="d-times"><span class="d-cur">0:00</span><span class="d-dur">-0:00</span></div>'
+      + '<div class="d-times"><span class="d-cur">0:00</span><span class="d-bpm">--</span><span class="d-dur">-0:00</span></div>'
       + midRow;
   }
 
@@ -862,7 +940,7 @@
       modalClear: $(".d-modal-clearurl"), modalClearPlaylist: $(".d-modal-clearlist"),
       url: $(".d-url"), loadBtn: $(".d-load"), title: $(".d-title"),
       wave: $(".d-wave"), zoomWave: $(".d-zoom"), waveLoading: $(".d-wave-loading"),
-      curTime: $(".d-cur"), durTime: $(".d-dur"),
+      curTime: $(".d-cur"), durTime: $(".d-dur"), bpmEl: $(".d-bpm"),
       playBtn: $(".d-play"), cueBtn: $(".d-cue"),
       speed: $(".d-speed"), speedVal: $(".d-speedval"),
       rangeBtn: $(".d-rangebtn"), speedReset: $(".d-speedreset"),
@@ -894,6 +972,7 @@
     var sourceGainNode = null; // per-node fade envelope, see DECLICK below
     var audioBuffer = null;
     var currentTrackKey = null;
+    var deckBpm = null; // raw detected BPM (at the track's native tempo), filled in async after load
     var waveSamples = null;
     var waveDragging = false, zoomDragging = false;
     var rafId = null;
@@ -1292,6 +1371,19 @@
       }
     }
 
+    // Both decks' analyzed BPM (each pitch-adjusted), refreshed alongside
+    // the time readouts every frame. Click toggles a beat-grid overlay on
+    // this deck's own vertical waveform (drawZoom below).
+    var showBeatGrid = false;
+    function updateBpmDisplay(){
+      if (deckBpm == null){ els.bpmEl.textContent = "--"; return; }
+      var mine = deckBpm * currentRate;
+      var otherDeck = decks[opts.id === "A" ? "B" : "A"];
+      var other = otherDeck ? otherDeck.getBpm() : null;
+      els.bpmEl.textContent = mine.toFixed(1) + " / " + (other == null ? "--" : other.toFixed(1));
+    }
+    els.bpmEl.addEventListener("click", function(){ showBeatGrid = !showBeatGrid; drawZoom(); });
+
     function seekFromEvent(e){
       var rect = els.wave.getBoundingClientRect();
       var clientX = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
@@ -1374,6 +1466,24 @@
       }
 
       var dpr = window.devicePixelRatio || 1;
+
+      // Beat grid — toggled by clicking the BPM readout. Anchored to t=0
+      // (no downbeat/phase detection), spaced by the pitch-adjusted beat
+      // interval so it still lines up while the tempo fader is bent.
+      if (showBeatGrid && deckBpm){
+        var beatSec = 60 / (deckBpm * currentRate);
+        if (beatSec > 0){
+          var k0 = Math.ceil(t0 / beatSec), k1 = Math.floor(t1 / beatSec);
+          zoomCtx.fillStyle = "rgba(200,200,200,0.35)";
+          for (var k = k0; k <= k1; k++){
+            var tb = k * beatSec;
+            if (tb < 0 || tb > dur) continue;
+            var yb = ((tb - t0) / (t1 - t0)) * h;
+            zoomCtx.fillRect(0, yb - dpr, w, dpr);
+          }
+        }
+      }
+
       zoomCtx.fillStyle = "#ff5500";
       zoomCtx.fillRect(0, h/2 - dpr, w, dpr*2);
 
@@ -1449,6 +1559,7 @@
       if (!isFinite(remaining) || remaining < 0) remaining = 0;
       els.durTime.textContent = "-" + fmt(remaining);
       els.durTime.classList.toggle("blink-warn", remaining > 0 && remaining <= BLINK_REMAINING_SEC);
+      updateBpmDisplay();
     }
 
     function waveLoop(){
@@ -1651,6 +1762,16 @@
           resizeWave(); resizeZoom();
           updateTimeDisplay();
           renderTransportUI(); drawWave(); drawZoom();
+
+          // Off the main thread, never awaited — playback is ready
+          // immediately regardless of how long this takes.
+          deckBpm = null;
+          updateBpmDisplay();
+          analyzeBpmAsync(res.buffer).then(function(bpm){
+            if (myGen !== loadGen) return;
+            deckBpm = bpm;
+            updateBpmDisplay();
+          });
         })
         .catch(function(err){
           if (myGen !== loadGen) return;
@@ -1677,7 +1798,18 @@
     function pauseForBackground(){
       if (isPlayingLike()) hardStopAt(getPosition());
     }
-    decks[opts.id] = { loadTrack: loadTrack, pauseForBackground: pauseForBackground };
+    // Current, pitch-adjusted BPM (or null if not analyzed yet) — read by
+    // the OTHER deck's updateBpmDisplay() so the .d-times row can show both
+    // decks' values at once.
+    function getBpm(){ return deckBpm == null ? null : deckBpm * currentRate; }
+    // Called once at startup (see bottom of file) with the resolved default
+    // tracks — prepended ahead of anything the user's already added.
+    function setInitialPlaylist(tracks){
+      playlistItems = tracks.concat(playlistItems);
+      renderPlaylist();
+      fillMissingTrackData();
+    }
+    decks[opts.id] = { loadTrack: loadTrack, pauseForBackground: pauseForBackground, getBpm: getBpm, setInitialPlaylist: setInitialPlaylist };
     return { output: gainNode };
   }
 
@@ -1824,6 +1956,26 @@
   // ---- instantiate: two decks, two mixer channels, wired together ----
   var deckA = createDeck({ root: document.getElementById("deckA"), id: "A", defaultTrackUrl: DEFAULT_TRACK_URL_A, mirror: false });
   var deckB = createDeck({ root: document.getElementById("deckB"), id: "B", defaultTrackUrl: DEFAULT_TRACK_URL_B, mirror: true });
+
+  // Seed both decks' playlists with all four "known" tracks — the two
+  // currently loaded on startup plus the two older defaults — so returning
+  // users see them without having to re-paste links. Resolved once here
+  // (not once per deck) to avoid fetching each URL twice.
+  (function seedDefaultPlaylist(){
+    var urls = [DEFAULT_TRACK_URL_A, DEFAULT_TRACK_URL_B, OLD_TRACK_URL_A, OLD_TRACK_URL_B];
+    Promise.all(urls.map(function(url){
+      var qs = "url=" + encodeURIComponent(url) + "&client_id=" + encodeURIComponent(clientId);
+      return fetch(apiBase + "/api/resolve?" + qs).then(function(r){
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      }).catch(function(){ return null; });
+    })).then(function(results){
+      var tracks = results.filter(function(r){ return r && r.kind === "track"; });
+      if (!tracks.length) return;
+      decks.A.setInitialPlaylist(tracks);
+      decks.B.setInitialPlaylist(tracks);
+    });
+  })();
 
   // Mobile/desktop browsers suspend (or fully discard) the AudioContext when
   // the tab/app is backgrounded — left alone, a deck can come back from that
