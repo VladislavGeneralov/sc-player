@@ -2167,7 +2167,10 @@
     if (document.hidden){
       decks.A.pauseForBackground();
       decks.B.pauseForBackground();
-      audioCtx.suspend();
+      // suspend() rejects if the context is already closed (rare, but
+      // possible if the user ignored the refresh prompt and backgrounded
+      // again) — swallow that instead of leaving an unhandled rejection.
+      audioCtx.suspend().catch(function(){});
     } else {
       resumeCtx();
     }
