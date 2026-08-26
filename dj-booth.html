@@ -191,10 +191,12 @@
   }
   .d-wave-loading.show{display:flex;}
   .d-times{display:flex; justify-content:space-between; font-size:10px; color:var(--muted); font-variant-numeric:tabular-nums;}
-  /* Both decks' analyzed BPM (each pitch-adjusted), sitting between the
-     current-time and remaining-time readouts. Clickable — toggles a beat
-     grid overlay on this deck's own vertical waveform. */
-  .d-bpm{color:var(--accent); cursor:pointer;}
+  /* This deck's analyzed BPM (pitch-adjusted), sitting between the
+     current-time and remaining-time readouts. Click toggles a beat-grid
+     overlay on this deck's own vertical waveform; double-click syncs this
+     deck to the other one. Padding+negative-margin enlarges the tap target
+     (small text, easy to miss on mobile) without shifting the row layout. */
+  .d-bpm{color:var(--accent); cursor:pointer; padding:8px 12px; margin:-8px -12px;}
   /* Last 30s of the track: the remaining-time readout blinks as a warning. */
   @keyframes durBlink{ 0%,49.9%{opacity:1;} 50%,100%{opacity:0;} }
   .d-dur.blink-warn{ color:var(--bad); animation:durBlink 1s linear infinite; }
