@@ -1321,6 +1321,8 @@
       }
       var sign = percent > 0 ? "+" : "";
       els.speedVal.textContent = sign + percent.toFixed(1) + "%";
+      updateBpmDisplay();
+      drawZoom();
     }
     els.speed.addEventListener("input", function(){ setTempo(els.speed.value); });
     wireDragGlow(els.speed);
@@ -1463,19 +1465,23 @@
       }
 
       var dpr = window.devicePixelRatio || 1;
+      var cue = getCue();
 
-      // Beat grid — toggled by clicking the BPM readout. Anchored to t=0
-      // (no downbeat/phase detection), spaced by the pitch-adjusted beat
-      // interval so it still lines up while the tempo fader is bent.
+      // Beat grid — toggled by clicking the BPM readout. Anchored to CUE
+      // (treated as the first downbeat) when one's set, otherwise t=0 — so
+      // setting CUE re-phases the whole grid without changing its spacing.
+      // Spaced by the pitch-adjusted beat interval so it still lines up
+      // while the tempo fader is bent.
       if (showBeatGrid && deckBpm){
         var beatSec = 60 / (deckBpm * currentRate);
         if (beatSec > 0){
-          var k0 = Math.ceil(t0 / beatSec), k1 = Math.floor(t1 / beatSec);
+          var anchor = cue !== undefined ? cue : 0;
+          var k0 = Math.ceil((t0 - anchor) / beatSec), k1 = Math.floor((t1 - anchor) / beatSec);
           for (var k = k0; k <= k1; k++){
-            var tb = k * beatSec;
+            var tb = anchor + k * beatSec;
             if (tb < 0 || tb > dur) continue;
             var yb = ((tb - t0) / (t1 - t0)) * h;
-            var isDownbeat = (k % 4 === 0); // every 4th beat, anchored at t=0 — no phase detection
+            var isDownbeat = (k % 4 === 0); // every 4th beat from the anchor
             var thick = isDownbeat ? dpr * 2.5 : dpr;
             zoomCtx.fillStyle = isDownbeat ? "rgba(255,85,0,0.8)" : "rgba(255,85,0,0.35)";
             zoomCtx.fillRect(0, yb - thick/2, w, thick);
@@ -1486,7 +1492,6 @@
       zoomCtx.fillStyle = "#ff5500";
       zoomCtx.fillRect(0, h/2 - dpr, w, dpr*2);
 
-      var cue = getCue();
       if (cue !== undefined && cue >= t0 && cue <= t1){
         zoomCtx.fillStyle = "#3ecf8e";
         zoomCtx.fillRect(0, ((cue-t0)/(t1-t0))*h - dpr, w, dpr*2);
@@ -1712,6 +1717,8 @@
     function loadTrack(url){
       var myGen = ++loadGen;
       setStatus("LOADING...", "");
+      deckBpm = null;
+      updateBpmDisplay();
       proxyFetch("/api/resolve", { url: url, client_id: clientId })
         .then(function(track){
           if (myGen !== loadGen) return null;
@@ -1763,9 +1770,8 @@
           renderTransportUI(); drawWave(); drawZoom();
 
           // Off the main thread, never awaited — playback is ready
-          // immediately regardless of how long this takes.
-          deckBpm = null;
-          updateBpmDisplay();
+          // immediately regardless of how long this takes. deckBpm was
+          // already cleared when the load started (see top of loadTrack).
           analyzeBpmAsync(res.buffer).then(function(bpm){
             if (myGen !== loadGen) return;
             deckBpm = bpm;
