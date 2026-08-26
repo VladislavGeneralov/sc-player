@@ -71,6 +71,17 @@
   .settings-panel .save{align-self:flex-end; padding:6px 14px; font-size:12px;}
   .settings-note{font-size:10px; color:var(--muted); line-height:1.4;}
 
+  /* Shown if the AudioContext gets fully closed (not just suspended) by the
+     OS after a long time backgrounded — rebuilding the whole audio graph
+     live isn't worth it, so this just asks for a reload instead. */
+  .refresh-overlay{
+    position:fixed; inset:0; z-index:9999; background:rgba(17,19,24,.96);
+    display:none; align-items:center; justify-content:center; text-align:center; padding:24px;
+  }
+  .refresh-overlay.show{display:flex;}
+  .refresh-overlay-text{color:var(--text); font-size:20px; font-weight:700; letter-spacing:1px;}
+  .refresh-overlay-sub{color:var(--muted); font-size:13px; margin-top:10px; max-width:320px;}
+
   button{background:var(--accent); color:#fff; border:none; border-radius:8px; font-weight:600; cursor:pointer;}
 
   /* ---------------- Decks ---------------- */
@@ -609,6 +620,12 @@
 </style>
 </head>
 <body>
+<div class="refresh-overlay" id="refreshOverlay">
+  <div>
+    <div class="refresh-overlay-text">PLEASE REFRESH THE PAGE</div>
+    <div class="refresh-overlay-sub">The audio engine stopped unexpectedly (usually after a long time in the background) and can't be recovered without a reload.</div>
+  </div>
+</div>
 <div class="booth">
 
   <button class="gear-btn" id="settingsBtn">⚙</button>
@@ -834,9 +851,37 @@
   // must share one context, since Web Audio nodes can't be connected across
   // contexts. Created immediately (starts "suspended" until a user gesture).
   var audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  function resumeCtx(){ if (audioCtx.state === "suspended") audioCtx.resume(); }
+  var refreshOverlay = document.getElementById("refreshOverlay");
+  function resumeCtx(){
+    // Rare, but the OS can fully discard the context (not just suspend it)
+    // after a long time backgrounded — rebuilding the whole audio graph live
+    // isn't worth it, so just ask for a reload instead of failing silently.
+    if (audioCtx.state === "closed"){ refreshOverlay.classList.add("show"); return; }
+    if (audioCtx.state === "suspended") audioCtx.resume();
+  }
   document.addEventListener("pointerdown", resumeCtx);
   document.addEventListener("keydown", resumeCtx);
+
+  // Keeps the screen from locking/sleeping while a deck is playing — mainly
+  // to avoid the backgrounding scenario above happening as often in the
+  // first place. Released automatically by the browser when the tab is
+  // hidden, and re-requested here once playback resumes in the foreground.
+  var wakeLock = null;
+  function refreshWakeLock(){
+    if (!("wakeLock" in navigator)) return;
+    var anyPlaying = (decks.A && decks.A.isPlaying()) || (decks.B && decks.B.isPlaying());
+    if (anyPlaying){
+      if (!wakeLock){
+        navigator.wakeLock.request("screen").then(function(lock){
+          wakeLock = lock;
+          lock.addEventListener("release", function(){ if (wakeLock === lock) wakeLock = null; });
+        }).catch(function(){});
+      }
+    } else if (wakeLock){
+      wakeLock.release().catch(function(){});
+      wakeLock = null;
+    }
+  }
 
   // Belt-and-suspenders on top of the CSS (touch-action/overscroll-behavior):
   // blocks the long-press context menu, drag-to-save, Safari's own pinch-zoom
@@ -1244,6 +1289,7 @@
       els.playBtn.textContent = playing ? "❚❚" : "▶";
       els.playBtn.classList.toggle("is-playing", playing);
       els.cueBtn.classList.toggle("is-playing", playing);
+      refreshWakeLock();
     }
 
     function kickLoop(){
@@ -1924,7 +1970,7 @@
       renderPlaylist();
       fillMissingTrackData();
     }
-    decks[opts.id] = { loadTrack: loadTrack, pauseForBackground: pauseForBackground, setInitialPlaylist: setInitialPlaylist, getSyncInfo: getSyncInfo };
+    decks[opts.id] = { loadTrack: loadTrack, pauseForBackground: pauseForBackground, setInitialPlaylist: setInitialPlaylist, getSyncInfo: getSyncInfo, isPlaying: isPlayingLike };
     return { output: gainNode };
   }
 
