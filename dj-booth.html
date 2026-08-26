@@ -2076,9 +2076,12 @@
 
     var inputBoost = audioCtx.createGain(); inputBoost.gain.value = 2;
     var trim = audioCtx.createGain();
-    var low = audioCtx.createBiquadFilter(); low.type = "lowshelf"; low.frequency.value = 240;
-    var mid = audioCtx.createBiquadFilter(); mid.type = "peaking"; mid.frequency.value = 1624; mid.Q.value = 0.8;
-    var high = audioCtx.createBiquadFilter(); high.type = "highshelf"; high.frequency.value = 7000;
+    // Roughly log-evenly spaced (low->mid and mid->high are each close to
+    // 0.8 decades apart) instead of the old 240/1624/7000, which crowded mid
+    // right up against high and left low oddly far from mid.
+    var low = audioCtx.createBiquadFilter(); low.type = "lowshelf"; low.frequency.value = 180;
+    var mid = audioCtx.createBiquadFilter(); mid.type = "peaking"; mid.frequency.value = 990; mid.Q.value = 0.8;
+    var high = audioCtx.createBiquadFilter(); high.type = "highshelf"; high.frequency.value = 8000;
     var fader = audioCtx.createGain(); fader.gain.value = parseFloat(faderInput.value);
     var xfade = audioCtx.createGain(); xfade.gain.value = 1;
     var analyser = audioCtx.createAnalyser(); analyser.fftSize = 256;
