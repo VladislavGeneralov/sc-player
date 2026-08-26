@@ -203,10 +203,9 @@
   .d-wave-loading.show{display:flex;}
   .d-times{display:flex; justify-content:space-between; font-size:10px; color:var(--muted); font-variant-numeric:tabular-nums;}
   /* This deck's analyzed BPM (pitch-adjusted), sitting between the
-     current-time and remaining-time readouts. Click toggles a beat-grid
-     overlay on this deck's own vertical waveform; double-click syncs this
-     deck to the other one. Padding+negative-margin enlarges the tap target
-     (small text, easy to miss on mobile) without shifting the row layout. */
+     current-time and remaining-time readouts. Double-click/double-tap syncs
+     this deck to the other one. Padding+negative-margin enlarges the tap
+     target (small text, easy to miss on mobile) without shifting the row layout. */
   .d-bpm{color:var(--accent); cursor:pointer; padding:8px 12px; margin:-8px -12px;}
   /* Last 30s of the track: the remaining-time readout blinks as a warning. */
   @keyframes durBlink{ 0%,49.9%{opacity:1;} 50%,100%{opacity:0;} }
@@ -1501,10 +1500,8 @@
     }
 
     // This deck's own analyzed BPM (pitch-adjusted), refreshed alongside the
-    // time readouts every frame. Click toggles a beat-grid overlay on this
-    // deck's own vertical waveform (drawZoom below); double-click syncs this
-    // deck to the other one (see syncToOtherDeck below).
-    var showBeatGrid = false;
+    // time readouts every frame. Double-click/double-tap syncs this deck to
+    // the other one (see syncToOtherDeck below).
     function updateBpmDisplay(){
       if (deckBpm == null){ els.bpmEl.textContent = "--"; return; }
       els.bpmEl.textContent = (deckBpm * currentRate).toFixed(1);
@@ -1518,8 +1515,6 @@
     var DBLTAP_MS = 350;
     var lastBpmClickTime = 0;
     els.bpmEl.addEventListener("click", function(){
-      showBeatGrid = !showBeatGrid;
-      drawZoom();
       var now = Date.now();
       if (now - lastBpmClickTime < DBLTAP_MS){
         lastBpmClickTime = 0; // require two fresh taps before firing again
@@ -1647,29 +1642,6 @@
 
       var dpr = window.devicePixelRatio || 1;
       var cue = getCue();
-
-      // Beat grid — toggled by clicking the BPM readout. Anchored to CUE
-      // (treated as the first downbeat) when one's set, otherwise the first
-      // onset the analysis found (see gridAnchor) — so setting CUE re-phases
-      // the whole grid without changing its spacing. Spaced by the
-      // pitch-adjusted beat interval so it still lines up while the tempo
-      // fader is bent.
-      if (showBeatGrid && deckBpm){
-        var beatSec = 60 / (deckBpm * currentRate);
-        if (beatSec > 0){
-          var anchor = gridAnchor();
-          var k0 = Math.ceil((t0 - anchor) / beatSec), k1 = Math.floor((t1 - anchor) / beatSec);
-          for (var k = k0; k <= k1; k++){
-            var tb = anchor + k * beatSec;
-            if (tb < 0 || tb > dur) continue;
-            var yb = ((tb - t0) / (t1 - t0)) * h;
-            var isDownbeat = (k % 4 === 0); // every 4th beat from the anchor
-            var thick = isDownbeat ? dpr * 2.5 : dpr;
-            zoomCtx.fillStyle = isDownbeat ? "rgba(255,85,0,0.8)" : "rgba(255,85,0,0.35)";
-            zoomCtx.fillRect(0, yb - thick/2, w, thick);
-          }
-        }
-      }
 
       zoomCtx.fillStyle = "#ff5500";
       zoomCtx.fillRect(0, h/2 - dpr, w, dpr*2);
