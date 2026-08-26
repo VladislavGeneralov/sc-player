@@ -757,11 +757,22 @@
     "  var bpm = 60 * envRate / lagf;",
     "  while (bpm < 90) bpm *= 2;",
     "  while (bpm > 180) bpm /= 2;",
-    "  return bpm;",
+    // First clearly-real onset in the window (not just the window's start) —
+    // used as the beat grid's default phase reference instead of always
+    // assuming t=0 lines up with a beat. Any genuine onset works equally
+    // well as an anchor (the grid repeats every beatSec either way), so the
+    // first one that's clearly above the noise floor is picked rather than
+    // whichever is strongest.
+    "  var maxDiff = 0;",
+    "  for (var i = 0; i < numBlocks; i++) if (diff[i] > maxDiff) maxDiff = diff[i];",
+    "  var onsetBlock = -1, onsetThreshold = maxDiff * 0.3;",
+    "  for (var i = 0; i < numBlocks; i++){ if (diff[i] >= onsetThreshold){ onsetBlock = i; break; } }",
+    "  var anchor = onsetBlock >= 0 ? onsetBlock * 0.01 : null;",
+    "  return { bpm: bpm, anchor: anchor };",
     "}",
     "self.onmessage = function(e){",
-    "  var bpm = detectBpm(e.data.samples, e.data.sampleRate);",
-    "  self.postMessage({ id: e.data.id, bpm: bpm });",
+    "  var result = detectBpm(e.data.samples, e.data.sampleRate);",
+    "  self.postMessage({ id: e.data.id, bpm: result ? result.bpm : null, anchor: result ? result.anchor : null });",
     "};",
   ].join("\n");
   var bpmWorker = new Worker(URL.createObjectURL(new Blob([BPM_WORKER_SRC], { type: "application/javascript" })));
@@ -769,7 +780,7 @@
   var bpmCallbacks = {};
   bpmWorker.onmessage = function(e){
     var cb = bpmCallbacks[e.data.id];
-    if (cb){ delete bpmCallbacks[e.data.id]; cb(e.data.bpm); }
+    if (cb){ delete bpmCallbacks[e.data.id]; cb({ bpm: e.data.bpm, anchor: e.data.anchor }); }
   };
   var BPM_WINDOW_SEC = 90;
   var BPM_PRIMARY_START_SEC = 20;
@@ -799,9 +810,15 @@
 
   // Analyzes up to ~90s starting just past a likely intro — bounds the work
   // for long tracks and, more importantly, gets a first number on screen
-  // fast without ever making the caller wait for it.
+  // fast without ever making the caller wait for it. Resolves to
+  // { bpm, anchor } where anchor is an absolute-time onset (or null if none
+  // found), converted from the window-relative value the worker returns.
   function analyzeBpmAsync(buffer){
-    return analyzeWindowAsync(extractMonoWindow(buffer, BPM_PRIMARY_START_SEC, BPM_WINDOW_SEC), buffer.sampleRate);
+    return analyzeWindowAsync(extractMonoWindow(buffer, BPM_PRIMARY_START_SEC, BPM_WINDOW_SEC), buffer.sampleRate)
+      .then(function(r){
+        if (!r || r.bpm == null) return null;
+        return { bpm: r.bpm, anchor: r.anchor != null ? BPM_PRIMARY_START_SEC + r.anchor : null };
+      });
   }
 
   // Runs after the first window's result is already on screen — takes two
@@ -821,7 +838,7 @@
     return Promise.all(starts.map(function(s){
       return analyzeWindowAsync(extractMonoWindow(buffer, s, BPM_WINDOW_SEC), buffer.sampleRate);
     })).then(function(results){
-      var all = [firstBpm].concat(results).filter(function(b){ return b != null; });
+      var all = [firstBpm].concat(results.map(function(r){ return r && r.bpm; })).filter(function(b){ return b != null; });
       if (all.length < 2) return null;
       all.sort(function(a, b){ return a - b; });
       return all[Math.floor(all.length / 2)];
@@ -1032,6 +1049,7 @@
     var audioBuffer = null;
     var currentTrackKey = null;
     var deckBpm = null; // raw detected BPM (at the track's native tempo), filled in async after load
+    var deckBeatAnchor = null; // absolute-time onset (seconds) the analysis found, used as the grid's default phase when no CUE is set
     var waveSamples = null;
     var waveDragging = false, zoomDragging = false;
     var rafId = null;
@@ -1306,6 +1324,15 @@
       drawWave(); drawZoom();
     }
 
+    // Default phase reference for the beat grid: CUE if one's set, otherwise
+    // the first clearly-real onset the analysis found (not a hardcoded t=0 —
+    // most tracks don't have a beat sitting exactly on the very first sample).
+    function gridAnchor(){
+      var cue = getCue();
+      if (cue !== undefined) return cue;
+      return deckBeatAnchor != null ? deckBeatAnchor : 0;
+    }
+
     function isPointOverEl(x, y, el){
       var r = el.getBoundingClientRect();
       return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
@@ -1432,15 +1459,51 @@
       }
     }
 
-    // Both decks' analyzed BPM (each pitch-adjusted), refreshed alongside
-    // the time readouts every frame. Click toggles a beat-grid overlay on
-    // this deck's own vertical waveform (drawZoom below).
+    // This deck's own analyzed BPM (pitch-adjusted), refreshed alongside the
+    // time readouts every frame. Click toggles a beat-grid overlay on this
+    // deck's own vertical waveform (drawZoom below); double-click syncs this
+    // deck to the other one (see syncToOtherDeck below).
     var showBeatGrid = false;
     function updateBpmDisplay(){
       if (deckBpm == null){ els.bpmEl.textContent = "--"; return; }
       els.bpmEl.textContent = (deckBpm * currentRate).toFixed(1);
     }
     els.bpmEl.addEventListener("click", function(){ showBeatGrid = !showBeatGrid; drawZoom(); });
+
+    // Read by the OTHER deck's syncToOtherDeck() — this deck's current tempo
+    // and its beat phase (position relative to its own grid anchor, folded
+    // into a single beat interval) at the moment it's asked for.
+    function getSyncInfo(){
+      if (deckBpm == null) return null;
+      var bpm = deckBpm * currentRate;
+      var beatSec = 60 / bpm;
+      var phase = ((getPosition() - gridAnchor()) % beatSec + beatSec) % beatSec;
+      return { bpm: bpm, beatSec: beatSec, phase: phase };
+    }
+
+    // SYNC: match this deck's tempo to the other deck's, then nudge this
+    // deck's playback to the nearest point where its beat grid lines up with
+    // the other deck's — any beat, not specifically a downbeat/bar boundary.
+    // The other deck is left completely alone.
+    function syncToOtherDeck(){
+      var other = decks[opts.id === "A" ? "B" : "A"];
+      var info = other && other.getSyncInfo();
+      if (!info || deckBpm == null) return;
+      var range = PITCH_RANGES[pitchRangeIdx];
+      var percent = clamp((info.bpm / deckBpm - 1) * 100, -range, range);
+      els.speed.value = percent;
+      setTempo(percent);
+      if (isPlayingLike()){
+        var beatSec = 60 / (deckBpm * currentRate);
+        var pos = getPosition();
+        var myPhase = ((pos - gridAnchor()) % beatSec + beatSec) % beatSec;
+        var delta = info.phase - myPhase;
+        delta -= Math.round(delta / beatSec) * beatSec; // shortest path, either direction
+        startSteadyPlayback(clamp(pos + delta, 0, engineDuration()));
+        renderTransportUI();
+      }
+    }
+    els.bpmEl.addEventListener("dblclick", syncToOtherDeck);
 
     function seekFromEvent(e){
       var rect = els.wave.getBoundingClientRect();
@@ -1528,14 +1591,15 @@
       var cue = getCue();
 
       // Beat grid — toggled by clicking the BPM readout. Anchored to CUE
-      // (treated as the first downbeat) when one's set, otherwise t=0 — so
-      // setting CUE re-phases the whole grid without changing its spacing.
-      // Spaced by the pitch-adjusted beat interval so it still lines up
-      // while the tempo fader is bent.
+      // (treated as the first downbeat) when one's set, otherwise the first
+      // onset the analysis found (see gridAnchor) — so setting CUE re-phases
+      // the whole grid without changing its spacing. Spaced by the
+      // pitch-adjusted beat interval so it still lines up while the tempo
+      // fader is bent.
       if (showBeatGrid && deckBpm){
         var beatSec = 60 / (deckBpm * currentRate);
         if (beatSec > 0){
-          var anchor = cue !== undefined ? cue : 0;
+          var anchor = gridAnchor();
           var k0 = Math.ceil((t0 - anchor) / beatSec), k1 = Math.floor((t1 - anchor) / beatSec);
           for (var k = k0; k <= k1; k++){
             var tb = anchor + k * beatSec;
@@ -1778,6 +1842,7 @@
       var myGen = ++loadGen;
       setStatus("LOADING...", "");
       deckBpm = null;
+      deckBeatAnchor = null;
       updateBpmDisplay();
       proxyFetch("/api/resolve", { url: url, client_id: clientId })
         .then(function(track){
@@ -1835,11 +1900,12 @@
           // The first window's result goes on screen right away; a couple
           // more windows are then checked in the background and can nudge
           // the displayed value afterward, while the track is already playing.
-          analyzeBpmAsync(res.buffer).then(function(bpm){
-            if (myGen !== loadGen) return null;
-            deckBpm = bpm;
+          analyzeBpmAsync(res.buffer).then(function(result){
+            if (myGen !== loadGen || !result) return null;
+            deckBpm = result.bpm;
+            deckBeatAnchor = result.anchor;
             updateBpmDisplay(); drawZoom();
-            return refineBpmAsync(res.buffer, bpm);
+            return refineBpmAsync(res.buffer, result.bpm);
           }).then(function(refined){
             if (refined == null || myGen !== loadGen) return;
             deckBpm = refined;
@@ -1878,7 +1944,7 @@
       renderPlaylist();
       fillMissingTrackData();
     }
-    decks[opts.id] = { loadTrack: loadTrack, pauseForBackground: pauseForBackground, setInitialPlaylist: setInitialPlaylist };
+    decks[opts.id] = { loadTrack: loadTrack, pauseForBackground: pauseForBackground, setInitialPlaylist: setInitialPlaylist, getSyncInfo: getSyncInfo };
     return { output: gainNode };
   }
 
