@@ -2078,9 +2078,9 @@
     var trim = audioCtx.createGain();
     // Roughly log-evenly spaced instead of the old 240/1624/7000, which
     // crowded mid right up against high and left low oddly far from mid.
-    var low = audioCtx.createBiquadFilter(); low.type = "lowshelf"; low.frequency.value = 220;
+    var low = audioCtx.createBiquadFilter(); low.type = "lowshelf"; low.frequency.value = 190;
     var mid = audioCtx.createBiquadFilter(); mid.type = "peaking"; mid.frequency.value = 990; mid.Q.value = 0.8;
-    var high = audioCtx.createBiquadFilter(); high.type = "highshelf"; high.frequency.value = 8080;
+    var high = audioCtx.createBiquadFilter(); high.type = "highshelf"; high.frequency.value = 7900;
     var fader = audioCtx.createGain(); fader.gain.value = parseFloat(faderInput.value);
     var xfade = audioCtx.createGain(); xfade.gain.value = 1;
     var analyser = audioCtx.createAnalyser(); analyser.fftSize = 256;
