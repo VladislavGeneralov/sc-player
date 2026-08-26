@@ -759,31 +759,11 @@
     "  var bpm = 60 * envRate / lagf;",
     "  while (bpm < 90) bpm *= 2;",
     "  while (bpm > 180) bpm /= 2;",
-    // Beat-grid phase reference — used instead of assuming t=0 lines up with
-    // a beat. Picking a single early onset isn't reliable on its own (it can
-    // be a stray transient rather than a real kick), so this sums diff[] at
-    // every block offset that repeats every ~lag blocks and keeps the offset
-    // with the most accumulated onset energy — i.e. whichever phase several
-    // early onsets agree on. Limited to the first ~16 beat cycles rather than
-    // the whole window: bestLag is a whole-block rounding of the true
-    // (fractional) beat length, and summing with that rounded step drifts
-    // further from the real phase the longer the span — over the full ~90s
-    // window that drift alone was throwing the anchor off by up to half a
-    // beat, worse than just taking the very first onset.
-    "  var lagInt = Math.max(1, Math.round(lagf));",
-    "  var phaseSpan = Math.min(numBlocks, lagInt * 16);",
-    "  var bestPhase = 0, bestPhaseScore = -Infinity;",
-    "  for (var offset = 0; offset < lagInt; offset++){",
-    "    var sum = 0;",
-    "    for (var i = offset; i < phaseSpan; i += lagInt) sum += diff[i];",
-    "    if (sum > bestPhaseScore){ bestPhaseScore = sum; bestPhase = offset; }",
-    "  }",
-    "  var anchor = bestPhase * 0.01;",
-    "  return { bpm: bpm, anchor: anchor };",
+    "  return bpm;",
     "}",
     "self.onmessage = function(e){",
-    "  var result = detectBpm(e.data.samples, e.data.sampleRate);",
-    "  self.postMessage({ id: e.data.id, bpm: result ? result.bpm : null, anchor: result ? result.anchor : null });",
+    "  var bpm = detectBpm(e.data.samples, e.data.sampleRate);",
+    "  self.postMessage({ id: e.data.id, bpm: bpm });",
     "};",
   ].join("\n");
   var bpmWorker = new Worker(URL.createObjectURL(new Blob([BPM_WORKER_SRC], { type: "application/javascript" })));
@@ -791,7 +771,7 @@
   var bpmCallbacks = {};
   bpmWorker.onmessage = function(e){
     var cb = bpmCallbacks[e.data.id];
-    if (cb){ delete bpmCallbacks[e.data.id]; cb({ bpm: e.data.bpm, anchor: e.data.anchor }); }
+    if (cb){ delete bpmCallbacks[e.data.id]; cb(e.data.bpm); }
   };
   var BPM_WINDOW_SEC = 90;
   var BPM_PRIMARY_START_SEC = 20;
@@ -821,15 +801,9 @@
 
   // Analyzes up to ~90s starting just past a likely intro — bounds the work
   // for long tracks and, more importantly, gets a first number on screen
-  // fast without ever making the caller wait for it. Resolves to
-  // { bpm, anchor } where anchor is an absolute-time onset (or null if none
-  // found), converted from the window-relative value the worker returns.
+  // fast without ever making the caller wait for it.
   function analyzeBpmAsync(buffer){
-    return analyzeWindowAsync(extractMonoWindow(buffer, BPM_PRIMARY_START_SEC, BPM_WINDOW_SEC), buffer.sampleRate)
-      .then(function(r){
-        if (!r || r.bpm == null) return null;
-        return { bpm: r.bpm, anchor: r.anchor != null ? BPM_PRIMARY_START_SEC + r.anchor : null };
-      });
+    return analyzeWindowAsync(extractMonoWindow(buffer, BPM_PRIMARY_START_SEC, BPM_WINDOW_SEC), buffer.sampleRate);
   }
 
   // Runs after the first window's result is already on screen — takes two
@@ -849,7 +823,7 @@
     return Promise.all(starts.map(function(s){
       return analyzeWindowAsync(extractMonoWindow(buffer, s, BPM_WINDOW_SEC), buffer.sampleRate);
     })).then(function(results){
-      var all = [firstBpm].concat(results.map(function(r){ return r && r.bpm; })).filter(function(b){ return b != null; });
+      var all = [firstBpm].concat(results).filter(function(b){ return b != null; });
       if (all.length < 2) return null;
       all.sort(function(a, b){ return a - b; });
       return all[Math.floor(all.length / 2)];
@@ -1060,8 +1034,6 @@
     var audioBuffer = null;
     var currentTrackKey = null;
     var deckBpm = null; // raw detected BPM (at the track's native tempo), filled in async after load
-    var deckBeatAnchor = null; // absolute-time onset (seconds) the analysis found, used as the grid's default phase when no CUE is set
-    var cueIsManual = false; // true once the user has actually pressed CUE themselves, as opposed to the automatic cue-at-0 every load starts with
     var waveSamples = null;
     var waveDragging = false, zoomDragging = false;
     var rafId = null;
@@ -1336,13 +1308,11 @@
       drawWave(); drawZoom();
     }
 
-    // Default phase reference for the beat grid: the CUE point, but only
-    // once the user has actually pressed CUE themselves — the automatic
-    // cue-at-0 every load starts with doesn't count (see cueIsManual below),
-    // so a fresh load still grids off the detected onset instead of always
-    // anchoring at t=0.
+    // Beat grid's phase reference is just the CUE point (defaulting to 0,
+    // same as CUE itself does when none's been set yet).
     function gridAnchor(){
-      return cueIsManual ? getCue() : (deckBeatAnchor != null ? deckBeatAnchor : 0);
+      var cue = getCue();
+      return cue !== undefined ? cue : 0;
     }
 
     function isPointOverEl(x, y, el){
@@ -1368,14 +1338,13 @@
           kickLoop();
           renderTransportUI();
         } else {
-          cueIsManual = true;
           setCue(pos);
           if (state === "stuttering"){ stopNode(); state = "stopped"; renderTransportUI(); }
         }
       } else {
         var target = cue !== undefined ? cue : 0;
         hardStopAt(target);
-        if (cue === undefined){ cueIsManual = true; setCue(0); }
+        if (cue === undefined) setCue(0);
       }
     });
     els.cueBtn.addEventListener("pointerup", function(e){
@@ -1855,7 +1824,6 @@
       var myGen = ++loadGen;
       setStatus("LOADING...", "");
       deckBpm = null;
-      deckBeatAnchor = null;
       updateBpmDisplay();
       proxyFetch("/api/resolve", { url: url, client_id: clientId })
         .then(function(track){
@@ -1897,11 +1865,8 @@
           stopNode(); state = "stopped"; pausedPosition = 0;
           // Every load always cues to 0 — no cross-session memory, so a cue
           // point never carries over from an earlier time this same track
-          // happened to be loaded on this deck. Not a *manual* cue though
-          // (see cueIsManual/gridAnchor) — the beat grid still grids off the
-          // detected onset until the user actually presses CUE themselves.
+          // happened to be loaded on this deck.
           setCue(0);
-          cueIsManual = false;
           audioBuffer = res.buffer;
           zoomPeaks = computePeaks(res.buffer);
           waveSamples = (res.waveform && res.waveform.samples) || null;
@@ -1916,12 +1881,11 @@
           // The first window's result goes on screen right away; a couple
           // more windows are then checked in the background and can nudge
           // the displayed value afterward, while the track is already playing.
-          analyzeBpmAsync(res.buffer).then(function(result){
-            if (myGen !== loadGen || !result) return null;
-            deckBpm = result.bpm;
-            deckBeatAnchor = result.anchor;
+          analyzeBpmAsync(res.buffer).then(function(bpm){
+            if (myGen !== loadGen) return null;
+            deckBpm = bpm;
             updateBpmDisplay(); drawZoom();
-            return refineBpmAsync(res.buffer, result.bpm);
+            return refineBpmAsync(res.buffer, bpm);
           }).then(function(refined){
             if (refined == null || myGen !== loadGen) return;
             deckBpm = refined;
