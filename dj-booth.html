@@ -757,17 +757,26 @@
     "  var bpm = 60 * envRate / lagf;",
     "  while (bpm < 90) bpm *= 2;",
     "  while (bpm > 180) bpm /= 2;",
-    // First clearly-real onset in the window (not just the window's start) —
-    // used as the beat grid's default phase reference instead of always
-    // assuming t=0 lines up with a beat. Any genuine onset works equally
-    // well as an anchor (the grid repeats every beatSec either way), so the
-    // first one that's clearly above the noise floor is picked rather than
-    // whichever is strongest.
-    "  var maxDiff = 0;",
-    "  for (var i = 0; i < numBlocks; i++) if (diff[i] > maxDiff) maxDiff = diff[i];",
-    "  var onsetBlock = -1, onsetThreshold = maxDiff * 0.3;",
-    "  for (var i = 0; i < numBlocks; i++){ if (diff[i] >= onsetThreshold){ onsetBlock = i; break; } }",
-    "  var anchor = onsetBlock >= 0 ? onsetBlock * 0.01 : null;",
+    // Beat-grid phase reference — used instead of assuming t=0 lines up with
+    // a beat. Picking a single early onset isn't reliable on its own (it can
+    // be a stray transient rather than a real kick), so this sums diff[] at
+    // every block offset that repeats every ~lag blocks and keeps the offset
+    // with the most accumulated onset energy — i.e. whichever phase several
+    // early onsets agree on. Limited to the first ~16 beat cycles rather than
+    // the whole window: bestLag is a whole-block rounding of the true
+    // (fractional) beat length, and summing with that rounded step drifts
+    // further from the real phase the longer the span — over the full ~90s
+    // window that drift alone was throwing the anchor off by up to half a
+    // beat, worse than just taking the very first onset.
+    "  var lagInt = Math.max(1, Math.round(lagf));",
+    "  var phaseSpan = Math.min(numBlocks, lagInt * 16);",
+    "  var bestPhase = 0, bestPhaseScore = -Infinity;",
+    "  for (var offset = 0; offset < lagInt; offset++){",
+    "    var sum = 0;",
+    "    for (var i = offset; i < phaseSpan; i += lagInt) sum += diff[i];",
+    "    if (sum > bestPhaseScore){ bestPhaseScore = sum; bestPhase = offset; }",
+    "  }",
+    "  var anchor = bestPhase * 0.01;",
     "  return { bpm: bpm, anchor: anchor };",
     "}",
     "self.onmessage = function(e){",
