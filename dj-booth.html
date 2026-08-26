@@ -867,15 +867,23 @@
   // first place. Released automatically by the browser when the tab is
   // hidden, and re-requested here once playback resumes in the foreground.
   var wakeLock = null;
+  var wakeLockPending = false; // true while a request() is in flight, so two calls before it resolves don't both issue one
+  function anyDeckAudible(){
+    return (decks.A && decks.A.isAudible()) || (decks.B && decks.B.isAudible());
+  }
   function refreshWakeLock(){
     if (!("wakeLock" in navigator)) return;
-    var anyPlaying = (decks.A && decks.A.isPlaying()) || (decks.B && decks.B.isPlaying());
-    if (anyPlaying){
-      if (!wakeLock){
+    if (anyDeckAudible()){
+      if (!wakeLock && !wakeLockPending){
+        wakeLockPending = true;
         navigator.wakeLock.request("screen").then(function(lock){
+          wakeLockPending = false;
+          // Playback may have already stopped while this was in flight —
+          // don't hold a lock nothing still needs.
+          if (!anyDeckAudible()){ lock.release().catch(function(){}); return; }
           wakeLock = lock;
           lock.addEventListener("release", function(){ if (wakeLock === lock) wakeLock = null; });
-        }).catch(function(){});
+        }).catch(function(){ wakeLockPending = false; });
       }
     } else if (wakeLock){
       wakeLock.release().catch(function(){});
@@ -1217,6 +1225,10 @@
     function nudgeEnd(){ startRateRamp(currentRate, NUDGE_RAMP_OUT); }
 
     function startSteadyPlayback(pos){
+      // A fully-closed context (see resumeCtx's refresh-overlay branch) can't
+      // create nodes at all — bail instead of throwing into whatever caller
+      // (PLAY, CUE, jog, sync...) triggered this.
+      if (audioCtx.state === "closed") return;
       stopNode();
       sourceNode = audioCtx.createBufferSource();
       sourceNode.buffer = audioBuffer;
@@ -1250,6 +1262,7 @@
     }
     function playStutterChunk(){
       if (state !== "stuttering") return;
+      if (audioCtx.state === "closed") return; // see startSteadyPlayback
       var src = audioCtx.createBufferSource();
       src.buffer = audioBuffer;
       src.playbackRate.value = currentRate;
@@ -1970,7 +1983,12 @@
       renderPlaylist();
       fillMissingTrackData();
     }
-    decks[opts.id] = { loadTrack: loadTrack, pauseForBackground: pauseForBackground, setInitialPlaylist: setInitialPlaylist, getSyncInfo: getSyncInfo, isPlaying: isPlayingLike };
+    // Distinct from isPlayingLike(): also true during a CUE-hold stutter
+    // preview, where audio is audibly sounding but the transport UI still
+    // treats the deck as "not playing" — read by the wake-lock logic above,
+    // which cares about "is this deck making sound" rather than play-state.
+    function isAudible(){ return state === "playing" || state === "stuttering"; }
+    decks[opts.id] = { loadTrack: loadTrack, pauseForBackground: pauseForBackground, setInitialPlaylist: setInitialPlaylist, getSyncInfo: getSyncInfo, isAudible: isAudible };
     return { output: gainNode };
   }
 
