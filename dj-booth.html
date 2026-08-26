@@ -2042,7 +2042,7 @@
 
   // ---- master graph (created immediately — ctx always exists on this page) ----
   var masterSum = audioCtx.createGain(); masterSum.gain.value = 1;
-  var masterLevelGain = audioCtx.createGain(); masterLevelGain.gain.value = 0.5;
+  var masterLevelGain = audioCtx.createGain(); masterLevelGain.gain.value = 1; // overwritten by the MASTER knob's own setValue(def) right below anyway
   var masterAnalyser = audioCtx.createAnalyser(); masterAnalyser.fftSize = 256;
   masterSum.connect(masterLevelGain).connect(masterAnalyser).connect(audioCtx.destination);
 
@@ -2184,9 +2184,14 @@
   for (var mi=0; mi<12; mi++){ var mseg = document.createElement("div"); mseg.className = "mx-seg"; masterMeterEl.appendChild(mseg); }
   var masterMeterSegs = masterMeterEl.querySelectorAll(".mx-seg");
 
+  // Knob's raw 0..1 value is doubled before being applied as gain, so its
+  // center/default (0.5) lands on unity (0dB) instead of silently halving
+  // the signal — matches every other knob's "center = neutral" convention.
+  // Below center still cuts down to silence; above center now boosts up to
+  // +6dB instead of just topping out at unity.
   makeKnob({
     el: document.getElementById("masterKnob"),
-    min:0, max:1, def:0.5, onChange: function(v){ smoothSet(masterLevelGain.gain, v); }
+    min:0, max:1, def:0.5, onChange: function(v){ smoothSet(masterLevelGain.gain, v * 2); }
   });
 
   function drawMasterMeter(){
