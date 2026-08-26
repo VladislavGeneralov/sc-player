@@ -1509,7 +1509,25 @@
       if (deckBpm == null){ els.bpmEl.textContent = "--"; return; }
       els.bpmEl.textContent = (deckBpm * currentRate).toFixed(1);
     }
-    els.bpmEl.addEventListener("click", function(){ showBeatGrid = !showBeatGrid; drawZoom(); });
+    // Native dblclick is unreliable on touch here: the page sets
+    // touch-action:manipulation globally (removes the ~300ms tap delay and
+    // disables double-tap-to-zoom) — most mobile browsers stop synthesizing
+    // a dblclick event once they no longer need to distinguish single vs.
+    // double tap for zooming. Detect it manually off the (fast, reliable on
+    // both mouse and touch) click event instead.
+    var DBLTAP_MS = 350;
+    var lastBpmClickTime = 0;
+    els.bpmEl.addEventListener("click", function(){
+      showBeatGrid = !showBeatGrid;
+      drawZoom();
+      var now = Date.now();
+      if (now - lastBpmClickTime < DBLTAP_MS){
+        lastBpmClickTime = 0; // require two fresh taps before firing again
+        syncToOtherDeck();
+      } else {
+        lastBpmClickTime = now;
+      }
+    });
 
     // Read by the OTHER deck's syncToOtherDeck() — this deck's current tempo
     // and its beat phase (position relative to its own grid anchor, folded
@@ -1544,7 +1562,6 @@
         renderTransportUI();
       }
     }
-    els.bpmEl.addEventListener("dblclick", syncToOtherDeck);
 
     function seekFromEvent(e){
       var rect = els.wave.getBoundingClientRect();
