@@ -1061,6 +1061,7 @@
     var currentTrackKey = null;
     var deckBpm = null; // raw detected BPM (at the track's native tempo), filled in async after load
     var deckBeatAnchor = null; // absolute-time onset (seconds) the analysis found, used as the grid's default phase when no CUE is set
+    var cueIsManual = false; // true once the user has actually pressed CUE themselves, as opposed to the automatic cue-at-0 every load starts with
     var waveSamples = null;
     var waveDragging = false, zoomDragging = false;
     var rafId = null;
@@ -1335,13 +1336,13 @@
       drawWave(); drawZoom();
     }
 
-    // Default phase reference for the beat grid: CUE if one's set, otherwise
-    // the first clearly-real onset the analysis found (not a hardcoded t=0 —
-    // most tracks don't have a beat sitting exactly on the very first sample).
+    // Default phase reference for the beat grid: the CUE point, but only
+    // once the user has actually pressed CUE themselves — the automatic
+    // cue-at-0 every load starts with doesn't count (see cueIsManual below),
+    // so a fresh load still grids off the detected onset instead of always
+    // anchoring at t=0.
     function gridAnchor(){
-      var cue = getCue();
-      if (cue !== undefined) return cue;
-      return deckBeatAnchor != null ? deckBeatAnchor : 0;
+      return cueIsManual ? getCue() : (deckBeatAnchor != null ? deckBeatAnchor : 0);
     }
 
     function isPointOverEl(x, y, el){
@@ -1367,13 +1368,14 @@
           kickLoop();
           renderTransportUI();
         } else {
+          cueIsManual = true;
           setCue(pos);
           if (state === "stuttering"){ stopNode(); state = "stopped"; renderTransportUI(); }
         }
       } else {
         var target = cue !== undefined ? cue : 0;
         hardStopAt(target);
-        if (cue === undefined) setCue(0);
+        if (cue === undefined){ cueIsManual = true; setCue(0); }
       }
     });
     els.cueBtn.addEventListener("pointerup", function(e){
@@ -1895,8 +1897,11 @@
           stopNode(); state = "stopped"; pausedPosition = 0;
           // Every load always cues to 0 — no cross-session memory, so a cue
           // point never carries over from an earlier time this same track
-          // happened to be loaded on this deck.
+          // happened to be loaded on this deck. Not a *manual* cue though
+          // (see cueIsManual/gridAnchor) — the beat grid still grids off the
+          // detected onset until the user actually presses CUE themselves.
           setCue(0);
+          cueIsManual = false;
           audioBuffer = res.buffer;
           zoomPeaks = computePeaks(res.buffer);
           waveSamples = (res.waveform && res.waveform.samples) || null;
