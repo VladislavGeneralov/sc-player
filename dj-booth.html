@@ -1042,6 +1042,56 @@
   // deck finishes constructing itself, read only later at click-time.
   var decks = {};
 
+  // One shared track browser/library, not one per deck — adding a track via
+  // either deck's ADD button makes it show up (and stay in sync) in both
+  // decks' lists, not just the one it was added from.
+  var playlistItems = [];
+  var listGen = 0; // bumped on Clear Playlist so a stale background fill can't resurrect cleared rows
+  function renderAllPlaylists(){
+    if (decks.A) decks.A.renderPlaylist();
+    if (decks.B) decks.B.renderPlaylist();
+  }
+  function proxyFetch(path, params){
+    var qs = Object.keys(params).map(function(k){ return k + "=" + encodeURIComponent(params[k]); }).join("&");
+    return fetch(apiBase + path + "?" + qs).then(function(r){
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    });
+  }
+  // Large playlists come back from /api/resolve with only the first handful
+  // of tracks fully populated — the rest are truncated to just an id.
+  // Batch-fetch the missing ones (chunked — SoundCloud's batch endpoint
+  // doesn't take unlimited ids in one request) and merge them in.
+  var TRACKS_BATCH_SIZE = 50;
+  function fillMissingTrackData(){
+    var myGen = listGen;
+    var stubs = playlistItems.filter(function(t){ return !t.permalink_url || !t.title; });
+    if (!stubs.length) return;
+    var ids = stubs.map(function(t){ return t.id; });
+    var chunks = [];
+    for (var i = 0; i < ids.length; i += TRACKS_BATCH_SIZE) chunks.push(ids.slice(i, i + TRACKS_BATCH_SIZE));
+    Promise.all(chunks.map(function(chunk){
+      return proxyFetch("/api/tracks", { ids: chunk.join(","), client_id: clientId }).catch(function(){ return []; });
+    })).then(function(results){
+      if (myGen !== listGen) return; // list was cleared/replaced meanwhile
+      var full = {};
+      results.forEach(function(r){
+        var arr = Array.isArray(r) ? r : (r && r.collection) || [];
+        arr.forEach(function(t){ full[t.id] = t; });
+      });
+      playlistItems = playlistItems.map(function(t){ return full[t.id] || t; });
+      renderAllPlaylists();
+    });
+  }
+
+  // Called once at startup (see bottom of file) with the resolved default
+  // tracks — prepended ahead of anything the user's already added.
+  function setInitialPlaylist(tracks){
+    playlistItems = tracks.concat(playlistItems);
+    renderAllPlaylists();
+    fillMissingTrackData();
+  }
+
   function createDeck(opts){
     var root = opts.root;
     root.innerHTML = deckMarkup(opts.mirror);
@@ -1737,23 +1787,16 @@
     els.jogFwd.addEventListener("pointercancel", nudgeEnd);
 
     // ---- Loading a track ----
-    function proxyFetch(path, params){
-      var qs = Object.keys(params).map(function(k){ return k + "=" + encodeURIComponent(params[k]); }).join("&");
-      return fetch(apiBase + path + "?" + qs).then(function(r){
-        if (!r.ok) throw new Error("HTTP " + r.status);
-        return r.json();
-      });
-    }
 
     // Clicking a track in a resolved playlist just calls loadTrack() again
     // with that track's own URL — reuses the exact same single-track path.
     // ADD never plays anything itself — it just resolves a track/playlist
-    // and drops the result(s) at the top of this deck's own list. Actually
+    // and drops the result(s) at the top of the (shared) list. Actually
     // loading a listed track onto a deck happens later, via that row's own
     // A/B button (loadTrack(), below) — which can target either deck.
-    var playlistItems = [];
-    var listGen = 0; // bumped on Clear Playlist so a stale background fill can't resurrect cleared rows
-
+    // playlistItems/listGen/fillMissingTrackData are shared (see just above
+    // createDeck) so both decks show the same list — this renders it into
+    // THIS deck's own modal DOM.
     function renderPlaylist(){
       els.modalList.innerHTML = playlistItems.map(function(t, idx){
         var artist = (t.user && t.user.username) || "";
@@ -1779,7 +1822,7 @@
       if (!track) return;
       if (e.target.closest(".d-modal-track-remove")){
         playlistItems.splice(idx, 1);
-        renderPlaylist();
+        renderAllPlaylists();
         return;
       }
       var deckBtn = e.target.closest(".d-modal-track-deck");
@@ -1800,7 +1843,7 @@
             var full = arr[0];
             if (!full || !full.permalink_url) throw new Error("Track info unavailable");
             playlistItems[idx] = full;
-            renderPlaylist();
+            renderAllPlaylists();
             target.loadTrack(full.permalink_url);
           })
           .catch(function(err){ setStatus("Error: " + err.message, "err"); });
@@ -1809,34 +1852,8 @@
     els.modalClearPlaylist.addEventListener("click", function(){
       playlistItems = [];
       listGen++;
-      renderPlaylist();
+      renderAllPlaylists();
     });
-
-    // Large playlists come back from /api/resolve with only the first
-    // handful of tracks fully populated — the rest are truncated to just an
-    // id. Batch-fetch the missing ones (chunked — SoundCloud's batch
-    // endpoint doesn't take unlimited ids in one request) and merge them in.
-    var TRACKS_BATCH_SIZE = 50;
-    function fillMissingTrackData(){
-      var myGen = listGen;
-      var stubs = playlistItems.filter(function(t){ return !t.permalink_url || !t.title; });
-      if (!stubs.length) return;
-      var ids = stubs.map(function(t){ return t.id; });
-      var chunks = [];
-      for (var i = 0; i < ids.length; i += TRACKS_BATCH_SIZE) chunks.push(ids.slice(i, i + TRACKS_BATCH_SIZE));
-      Promise.all(chunks.map(function(chunk){
-        return proxyFetch("/api/tracks", { ids: chunk.join(","), client_id: clientId }).catch(function(){ return []; });
-      })).then(function(results){
-        if (myGen !== listGen) return; // list was cleared/replaced meanwhile
-        var full = {};
-        results.forEach(function(r){
-          var arr = Array.isArray(r) ? r : (r && r.collection) || [];
-          arr.forEach(function(t){ full[t.id] = t; });
-        });
-        playlistItems = playlistItems.map(function(t){ return full[t.id] || t; });
-        renderPlaylist();
-      });
-    }
 
     function addToList(url){
       setStatus("LOADING...", "");
@@ -1853,7 +1870,7 @@
           } else {
             throw new Error("Unsupported link (not a track or playlist)");
           }
-          renderPlaylist();
+          renderAllPlaylists();
           fillMissingTrackData();
         })
         .catch(function(err){ setStatus("Error: " + err.message, "err"); })
@@ -1965,19 +1982,12 @@
     function pauseForBackground(){
       if (isPlayingLike()) hardStopAt(getPosition());
     }
-    // Called once at startup (see bottom of file) with the resolved default
-    // tracks — prepended ahead of anything the user's already added.
-    function setInitialPlaylist(tracks){
-      playlistItems = tracks.concat(playlistItems);
-      renderPlaylist();
-      fillMissingTrackData();
-    }
     // Distinct from isPlayingLike(): also true during a CUE-hold stutter
     // preview, where audio is audibly sounding but the transport UI still
     // treats the deck as "not playing" — read by the wake-lock logic above,
     // which cares about "is this deck making sound" rather than play-state.
     function isAudible(){ return state === "playing" || state === "stuttering"; }
-    decks[opts.id] = { loadTrack: loadTrack, pauseForBackground: pauseForBackground, setInitialPlaylist: setInitialPlaylist, getSyncInfo: getSyncInfo, isAudible: isAudible };
+    decks[opts.id] = { loadTrack: loadTrack, pauseForBackground: pauseForBackground, getSyncInfo: getSyncInfo, isAudible: isAudible, renderPlaylist: renderPlaylist };
     return { output: gainNode };
   }
 
@@ -1992,7 +2002,20 @@
   }
 
   var EQ_CUT_DB = -70, EQ_BOOST_DB = 6;
-  function eqDb(t){ return t <= 0.5 ? EQ_CUT_DB * (1 - t/0.5) : EQ_BOOST_DB * ((t-0.5)/0.5); }
+  // Cut side is curved (power >1), not linear in knob position: a straight
+  // line meant every 10% of travel was the same flat 14dB step everywhere,
+  // so 40%->50% (0dB region, clearly audible) felt exactly as drastic as
+  // 10%->20% (already near-silent down there) even though the raw dB delta
+  // was identical — perceived loudness near unity is far more sensitive to
+  // a given dB change than it is deep in the cut. Squaring keeps the full
+  // -70dB kill exactly at 0% while making movement near center much gentler
+  // (40% is now ~-2.8dB instead of -14dB) and pushing the steep part down
+  // toward the bottom of the travel instead.
+  var EQ_CUT_CURVE_POWER = 2;
+  function eqDb(t){
+    if (t <= 0.5) return EQ_CUT_DB * Math.pow(1 - t/0.5, EQ_CUT_CURVE_POWER);
+    return EQ_BOOST_DB * ((t-0.5)/0.5);
+  }
 
   function makeKnob(o){
     var value = o.def;
@@ -2125,10 +2148,9 @@
   var deckA = createDeck({ root: document.getElementById("deckA"), id: "A", defaultTrackUrl: DEFAULT_TRACK_URL_A, mirror: false });
   var deckB = createDeck({ root: document.getElementById("deckB"), id: "B", defaultTrackUrl: DEFAULT_TRACK_URL_B, mirror: true });
 
-  // Seed both decks' playlists with all four "known" tracks — the two
+  // Seed the shared playlist with all four "known" tracks — the two
   // currently loaded on startup plus the two older defaults — so returning
-  // users see them without having to re-paste links. Resolved once here
-  // (not once per deck) to avoid fetching each URL twice.
+  // users see them without having to re-paste links.
   (function seedDefaultPlaylist(){
     var urls = [DEFAULT_TRACK_URL_A, DEFAULT_TRACK_URL_B, OLD_TRACK_URL_A, OLD_TRACK_URL_B];
     Promise.all(urls.map(function(url){
@@ -2140,8 +2162,7 @@
     })).then(function(results){
       var tracks = results.filter(function(r){ return r && r.kind === "track"; });
       if (!tracks.length) return;
-      decks.A.setInitialPlaylist(tracks);
-      decks.B.setInitialPlaylist(tracks);
+      setInitialPlaylist(tracks);
     });
   })();
 
