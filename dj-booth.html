@@ -758,8 +758,12 @@
     settingsPanel.hidden = true;
   });
 
-  var DEFAULT_TRACK_URL_A = "https://on.soundcloud.com/yL3dGRA3jifXCVGtob";
-  var DEFAULT_TRACK_URL_B = "https://on.soundcloud.com/NPueHVV9bkX0aZcGtM";
+  // Verified working end to end (resolve + actual progressive stream
+  // fetch, both 200) — the earlier on.soundcloud.com pair here had a
+  // stream broken on SoundCloud's own end (confirmed straight against
+  // api-v2, no proxy involved) for that specific label's content.
+  var DEFAULT_TRACK_URL_A = "https://on.soundcloud.com/00Md0tX9TcGTcTSj6h";
+  var DEFAULT_TRACK_URL_B = "https://on.soundcloud.com/PBUHGBPECoUT9U7ORb";
 
   // =========================================================================
   // Deck factory — one Pioneer-CDJ-style deck (Web Audio playback engine:
