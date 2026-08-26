@@ -27,6 +27,22 @@ async function proxyJson(targetUrl) {
   });
 }
 
+// SoundCloud's mobile-app "share" links are shortened redirectors
+// (https://on.soundcloud.com/xxxxx) that 302 to the real permalink —
+// api-v2.soundcloud.com/resolve doesn't follow that redirect itself and
+// just 404s on the short link. Expand it here first so /resolve always
+// gets the canonical soundcloud.com URL.
+async function expandShortLink(trackUrl) {
+  try {
+    const u = new URL(trackUrl);
+    if (u.hostname !== "on.soundcloud.com") return trackUrl;
+    const res = await fetch(trackUrl, { redirect: "follow" });
+    return res.url || trackUrl;
+  } catch (e) {
+    return trackUrl;
+  }
+}
+
 export default {
   async fetch(request) {
     const url = new URL(request.url);
@@ -36,9 +52,10 @@ export default {
     }
 
     if (url.pathname === "/api/resolve") {
-      const trackUrl = url.searchParams.get("url");
+      let trackUrl = url.searchParams.get("url");
       const clientId = url.searchParams.get("client_id");
       if (!trackUrl || !clientId) return jsonResponse({ error: "Missing url or client_id" }, 400);
+      trackUrl = await expandShortLink(trackUrl);
       const target = "https://api-v2.soundcloud.com/resolve?url=" + encodeURIComponent(trackUrl) + "&client_id=" + encodeURIComponent(clientId);
       return proxyJson(target);
     }

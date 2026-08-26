@@ -28,7 +28,24 @@ function proxyJson(targetUrl, res) {
   });
 }
 
-const server = http.createServer((req, res) => {
+// SoundCloud's mobile-app "share" links are shortened redirectors
+// (https://on.soundcloud.com/xxxxx) that 302 to the real permalink —
+// api-v2.soundcloud.com/resolve doesn't follow that redirect itself and
+// just 404s on the short link. Expand it here first so /resolve always
+// gets the canonical soundcloud.com URL. Uses the global fetch (Node 18+)
+// since it follows redirects by default and exposes the final response.url.
+async function expandShortLink(trackUrl) {
+  try {
+    var u = new URL(trackUrl);
+    if (u.hostname !== "on.soundcloud.com") return trackUrl;
+    var res = await fetch(trackUrl, { redirect: "follow" });
+    return res.url || trackUrl;
+  } catch (e) {
+    return trackUrl;
+  }
+}
+
+const server = http.createServer(async (req, res) => {
   var u = new URL(req.url, "http://localhost:" + PORT);
 
   // Root now serves dj-booth.html (the active app) instead of the older
@@ -70,6 +87,7 @@ const server = http.createServer((req, res) => {
     var trackUrl = u.searchParams.get("url");
     var clientId = u.searchParams.get("client_id");
     if (!trackUrl || !clientId) { res.writeHead(400); res.end("Missing url or client_id"); return; }
+    trackUrl = await expandShortLink(trackUrl);
     proxyJson("https://api-v2.soundcloud.com/resolve?url=" + encodeURIComponent(trackUrl) + "&client_id=" + encodeURIComponent(clientId), res);
     return;
   }

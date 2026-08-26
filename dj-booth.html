@@ -724,6 +724,11 @@
     var tag = e.target && e.target.tagName;
     if (tag !== "INPUT" && tag !== "TEXTAREA") e.preventDefault();
   });
+  // Dragging something IN from outside the page (a photo from the OS,
+  // another tab/app) — without this the browser tries to navigate to/open
+  // the dropped item, replacing the whole page.
+  document.addEventListener("dragover", function(e){ e.preventDefault(); });
+  document.addEventListener("drop", function(e){ e.preventDefault(); });
 
   // ---- Shared settings (client_id / API proxy base), used by both decks ----
   var DEFAULT_CLIENT_ID = "Pb72ranhoyt6gw7hM7TkzUItXlMWSNSo";
@@ -753,8 +758,8 @@
     settingsPanel.hidden = true;
   });
 
-  var DEFAULT_TRACK_URL_A = "https://soundcloud.com/recordeep-mag/premiere-unknown-artist-untitled-01-uknwn01?in_system_playlist=personalized-tracks%3A%3Ahooletronica%3A652496882";
-  var DEFAULT_TRACK_URL_B = "https://soundcloud.com/peardublin/new-members-soma-pear005?in_system_playlist=personalized-tracks%3A%3Ahooletronica%3A652496882";
+  var DEFAULT_TRACK_URL_A = "https://on.soundcloud.com/yL3dGRA3jifXCVGtob";
+  var DEFAULT_TRACK_URL_B = "https://on.soundcloud.com/NPueHVV9bkX0aZcGtM";
 
   // =========================================================================
   // Deck factory — one Pioneer-CDJ-style deck (Web Audio playback engine:
@@ -1661,7 +1666,14 @@
     els.url.value = opts.defaultTrackUrl;
     loadTrack(opts.defaultTrackUrl);
 
-    decks[opts.id] = { loadTrack: loadTrack };
+    // Backgrounding the tab/app must not leave a deck playing into a
+    // suspended AudioContext (silently, or worse, stuck) — a clean hard
+    // stop-in-place, not the stutter-cue pause, so there's nothing left
+    // running while hidden and pressing PLAY afterwards just resumes normally.
+    function pauseForBackground(){
+      if (isPlayingLike()) hardStopAt(getPosition());
+    }
+    decks[opts.id] = { loadTrack: loadTrack, pauseForBackground: pauseForBackground };
     return { output: gainNode };
   }
 
@@ -1808,6 +1820,24 @@
   // ---- instantiate: two decks, two mixer channels, wired together ----
   var deckA = createDeck({ root: document.getElementById("deckA"), id: "A", defaultTrackUrl: DEFAULT_TRACK_URL_A, mirror: false });
   var deckB = createDeck({ root: document.getElementById("deckB"), id: "B", defaultTrackUrl: DEFAULT_TRACK_URL_B, mirror: true });
+
+  // Mobile/desktop browsers suspend (or fully discard) the AudioContext when
+  // the tab/app is backgrounded — left alone, a deck can come back from that
+  // "playing" in name only, with silence that never returns even after
+  // pressing PLAY again. Hard-stop both decks in place going into the
+  // background (so nothing keeps "running" into a dead context) and force
+  // the shared context to explicitly suspend/resume around the transition
+  // rather than hoping the browser's own automatic handling behaves.
+  document.addEventListener("visibilitychange", function(){
+    if (document.hidden){
+      decks.A.pauseForBackground();
+      decks.B.pauseForBackground();
+      audioCtx.suspend();
+    } else {
+      resumeCtx();
+    }
+  });
+  window.addEventListener("focus", resumeCtx);
   var chA = createChannel("1", deckA.output,
     document.getElementById("eqColA"), document.getElementById("faderColA"), document.getElementById("meterA"));
   var chB = createChannel("2", deckB.output,
