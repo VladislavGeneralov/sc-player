@@ -1489,6 +1489,7 @@
     window.addEventListener("resize", resizeZoom);
 
     function drawZoom(){
+      if (!zoomCtx) return; // can be called (via setTempo) before the zoom canvas context exists yet
       var w = els.zoomWave.width, h = els.zoomWave.height;
       zoomCtx.clearRect(0, 0, w, h);
       var dur = engineDuration();
