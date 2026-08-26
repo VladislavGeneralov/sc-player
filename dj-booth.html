@@ -1377,10 +1377,7 @@
     var showBeatGrid = false;
     function updateBpmDisplay(){
       if (deckBpm == null){ els.bpmEl.textContent = "--"; return; }
-      var mine = deckBpm * currentRate;
-      var otherDeck = decks[opts.id === "A" ? "B" : "A"];
-      var other = otherDeck ? otherDeck.getBpm() : null;
-      els.bpmEl.textContent = mine.toFixed(1) + " / " + (other == null ? "--" : other.toFixed(1));
+      els.bpmEl.textContent = (deckBpm * currentRate).toFixed(1);
     }
     els.bpmEl.addEventListener("click", function(){ showBeatGrid = !showBeatGrid; drawZoom(); });
 
@@ -1474,12 +1471,14 @@
         var beatSec = 60 / (deckBpm * currentRate);
         if (beatSec > 0){
           var k0 = Math.ceil(t0 / beatSec), k1 = Math.floor(t1 / beatSec);
-          zoomCtx.fillStyle = "rgba(200,200,200,0.35)";
           for (var k = k0; k <= k1; k++){
             var tb = k * beatSec;
             if (tb < 0 || tb > dur) continue;
             var yb = ((tb - t0) / (t1 - t0)) * h;
-            zoomCtx.fillRect(0, yb - dpr, w, dpr);
+            var isDownbeat = (k % 4 === 0); // every 4th beat, anchored at t=0 — no phase detection
+            var thick = isDownbeat ? dpr * 2.5 : dpr;
+            zoomCtx.fillStyle = isDownbeat ? "rgba(255,85,0,0.8)" : "rgba(255,85,0,0.35)";
+            zoomCtx.fillRect(0, yb - thick/2, w, thick);
           }
         }
       }
@@ -1798,10 +1797,6 @@
     function pauseForBackground(){
       if (isPlayingLike()) hardStopAt(getPosition());
     }
-    // Current, pitch-adjusted BPM (or null if not analyzed yet) — read by
-    // the OTHER deck's updateBpmDisplay() so the .d-times row can show both
-    // decks' values at once.
-    function getBpm(){ return deckBpm == null ? null : deckBpm * currentRate; }
     // Called once at startup (see bottom of file) with the resolved default
     // tracks — prepended ahead of anything the user's already added.
     function setInitialPlaylist(tracks){
@@ -1809,7 +1804,7 @@
       renderPlaylist();
       fillMissingTrackData();
     }
-    decks[opts.id] = { loadTrack: loadTrack, pauseForBackground: pauseForBackground, getBpm: getBpm, setInitialPlaylist: setInitialPlaylist };
+    decks[opts.id] = { loadTrack: loadTrack, pauseForBackground: pauseForBackground, setInitialPlaylist: setInitialPlaylist };
     return { output: gainNode };
   }
 
