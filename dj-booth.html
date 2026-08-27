@@ -2276,15 +2276,34 @@
     });
   })();
 
+  // There's no fully reliable way to tell desktop from phone/tablet — but
+  // (pointer: fine) + (hover: hover) together are a strong, standard signal
+  // for "real mouse/trackpad, not a touchscreen" and are only true on an
+  // actual desktop/laptop. Require BOTH, positively, rather than just the
+  // absence of touch (many laptops have touchscreens too) — anything less
+  // than confident falls through to the mobile-safe behavior below. On a
+  // real computer, switching tabs to grab a link doesn't need any of this
+  // (that's what motivated the whole background-recovery mechanism in the
+  // first place — a phone/tablet browser genuinely can't have two tabs open
+  // side by side the way a desktop can); erring toward the mobile path
+  // whenever unsure is the deliberately safer default.
+  var isConfidentlyDesktop = false;
+  try {
+    isConfidentlyDesktop = matchMedia("(pointer: fine)").matches && matchMedia("(hover: hover)").matches;
+  } catch (e){}
+
   // Mobile/desktop browsers suspend (or fully discard) the AudioContext when
   // the tab/app is backgrounded — left alone, a deck can come back from that
   // "playing" in name only, with silence that never returns even after
   // pressing PLAY again. Hard-stop both decks in place going into the
   // background (so nothing keeps "running" into a dead context) and force
   // the shared context to explicitly suspend/resume around the transition
-  // rather than hoping the browser's own automatic handling behaves.
+  // rather than hoping the browser's own automatic handling behaves. Skipped
+  // entirely on a confident desktop — audio just keeps playing across a tab
+  // switch there, same as any other desktop media player.
   document.addEventListener("visibilitychange", function(){
     if (document.hidden){
+      if (isConfidentlyDesktop) return;
       decks.A.pauseForBackground();
       decks.B.pauseForBackground();
       // suspend() rejects if the context is already closed (rare, but
