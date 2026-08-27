@@ -2172,7 +2172,20 @@
     });
     o.el.addEventListener("pointerup", function(){ dragging = false; o.el.classList.remove("is-dragging"); });
     o.el.addEventListener("pointercancel", function(){ dragging = false; o.el.classList.remove("is-dragging"); });
-    o.el.addEventListener("dblclick", function(){ setValue(o.def); });
+    // Native dblclick doesn't fire on touch here (same reason as the BPM
+    // sync tap — touch-action:manipulation removes the double-tap gesture
+    // browsers use to decide whether to synthesize it) — detect it manually
+    // off click instead, same as the BPM readout.
+    var lastClickTime = 0;
+    o.el.addEventListener("click", function(){
+      var now = Date.now();
+      if (now - lastClickTime < 350){
+        lastClickTime = 0;
+        setValue(o.def);
+      } else {
+        lastClickTime = now;
+      }
+    });
     setValue(o.def);
   }
 
