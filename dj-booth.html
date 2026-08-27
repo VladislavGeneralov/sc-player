@@ -82,6 +82,36 @@
   .refresh-overlay-text{color:var(--text); font-size:20px; font-weight:700; letter-spacing:1px;}
   .refresh-overlay-sub{color:var(--muted); font-size:13px; margin-top:10px; max-width:320px;}
 
+  /* First-visit onboarding — shown once (localStorage-remembered), then
+     never again unless storage is cleared. */
+  .welcome-overlay{
+    position:fixed; inset:0; z-index:9998; background:rgba(17,19,24,.92);
+    display:none; align-items:center; justify-content:center; padding:24px;
+  }
+  .welcome-overlay.show{display:flex;}
+  .welcome-box{
+    background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    padding:20px; max-width:340px; width:100%;
+  }
+  .welcome-title{color:var(--accent); font-size:14px; font-weight:700; letter-spacing:1.5px; margin-bottom:14px;}
+  .welcome-list{margin:0; padding:0 0 0 18px; display:flex; flex-direction:column; gap:11px;}
+  .welcome-list li{color:var(--text); font-size:12.5px; line-height:1.5;}
+  .welcome-ok{width:100%; padding:10px; font-size:13px; margin-top:18px;}
+  /* Inline visual copies of real controls, dropped into the instruction
+     text itself rather than described in words — same colors/shape as the
+     actual buttons, just sized to sit inline in a sentence. */
+  .welcome-icon{display:inline-block; vertical-align:middle; line-height:1;}
+  .welcome-badge-range{
+    display:inline-flex; align-items:center; justify-content:center; vertical-align:middle;
+    width:18px; height:18px; font-size:7px; border-radius:50%;
+    background:var(--panel2); color:var(--text); border:1px solid var(--accent);
+  }
+  .welcome-jog{
+    display:inline-flex; align-items:center; justify-content:center; gap:3px; vertical-align:middle;
+    width:30px; height:18px; border-radius:6px;
+    background:var(--panel2); border:1px solid var(--border); color:var(--text);
+  }
+
   button{background:var(--accent); color:#fff; border:none; border-radius:8px; font-weight:600; cursor:pointer;}
 
   /* ---------------- Decks ---------------- */
@@ -625,6 +655,21 @@
     <div class="refresh-overlay-sub">The audio engine stopped unexpectedly (usually after a long time in the background) and can't be recovered without a reload.</div>
   </div>
 </div>
+<div class="welcome-overlay" id="welcomeOverlay">
+  <div class="welcome-box">
+    <div class="welcome-title">WELCOME</div>
+    <ul class="welcome-list">
+      <li>Turn on the physical volume switch on the left side of your phone</li>
+      <li>Use <span class="welcome-icon">🔗</span> icon to load tracks or playlists from soundcloud</li>
+      <li>All loaded tracks will be stored in the playlist until you reload the page</li>
+      <li>Use tempo range mode button <span class="welcome-badge-range">16</span> above the tempo slider for precise or wide speed adjustments</li>
+      <li>Use <span class="welcome-jog"><span class="d-chev d-chev-l"></span><span class="d-chev d-chev-l"></span></span> <span class="welcome-jog"><span class="d-chev d-chev-r"></span><span class="d-chev d-chev-r"></span></span> buttons as a jog wheel</li>
+      <li>Don't trust bpm analysers</li>
+      <li>Trust your ears</li>
+    </ul>
+    <button class="welcome-ok" id="welcomeOk">OK</button>
+  </div>
+</div>
 <div class="booth">
 
   <button class="gear-btn" id="settingsBtn">⚙</button>
@@ -851,6 +896,22 @@
   // contexts. Created immediately (starts "suspended" until a user gesture).
   var audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   var refreshOverlay = document.getElementById("refreshOverlay");
+
+  // First-visit onboarding — shown once, remembered in localStorage so it
+  // never comes back unless storage is cleared.
+  var WELCOME_SEEN_KEY = "scdj_welcome_seen";
+  (function initWelcomeOverlay(){
+    var overlay = document.getElementById("welcomeOverlay");
+    try {
+      if (localStorage.getItem(WELCOME_SEEN_KEY)) return;
+    } catch (e){}
+    overlay.classList.add("show");
+    document.getElementById("welcomeOk").addEventListener("click", function(){
+      overlay.classList.remove("show");
+      try { localStorage.setItem(WELCOME_SEEN_KEY, "1"); } catch (e){}
+    });
+  })();
+
   function resumeCtx(){
     if (audioCtx.state === "closed"){ refreshOverlay.classList.add("show"); return; }
     if (audioCtx.state === "suspended") audioCtx.resume();
