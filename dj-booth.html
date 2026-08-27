@@ -1123,17 +1123,27 @@
   }
 
   // A playlist resolve only fully populates the first handful of tracks —
-  // the rest come back truncated to just an id (fillMissingTrackData catches
-  // these up in the background, but startup's random pick can't wait for
-  // that) — fetch this one track's full data on demand if needed.
-  function ensureTrackUrl(track){
-    if (track.permalink_url) return Promise.resolve(track.permalink_url);
-    return proxyFetch("/api/tracks", { ids: String(track.id), client_id: clientId })
-      .then(function(r){
+  // the rest come back truncated to just an id. The default-playlist
+  // startup flow needs every track's real duration up front (to filter by
+  // length before picking), not the lazy background fill fillMissingTrackData
+  // does for already-rendered rows — so batch-fetch every stub's full data
+  // and return the same array with stubs replaced, same order.
+  function fetchFullTracks(tracks){
+    var stubs = tracks.filter(function(t){ return t.duration == null; });
+    if (!stubs.length) return Promise.resolve(tracks);
+    var ids = stubs.map(function(t){ return t.id; });
+    var chunks = [];
+    for (var i = 0; i < ids.length; i += TRACKS_BATCH_SIZE) chunks.push(ids.slice(i, i + TRACKS_BATCH_SIZE));
+    return Promise.all(chunks.map(function(chunk){
+      return proxyFetch("/api/tracks", { ids: chunk.join(","), client_id: clientId }).catch(function(){ return []; });
+    })).then(function(results){
+      var full = {};
+      results.forEach(function(r){
         var arr = Array.isArray(r) ? r : (r && r.collection) || [];
-        return arr[0] && arr[0].permalink_url;
-      })
-      .catch(function(){ return null; });
+        arr.forEach(function(t){ full[t.id] = t; });
+      });
+      return tracks.map(function(t){ return full[t.id] || t; });
+    });
   }
 
   function createDeck(opts){
@@ -2221,8 +2231,15 @@
     if (recoveredUrls.b) decks.B.loadTrack(recoveredUrls.b);
   }
 
-  // Resolve the default playlist once, seed the shared library with its
-  // whole tracklist, then — unless we just restored a specific pair above —
+  // Tracks outside this window are dropped entirely from the default
+  // library — both the shared browsable list and the random deck picks.
+  var MIN_DEFAULT_TRACK_SEC = 3 * 60 + 30; // 3:30
+  var MAX_DEFAULT_TRACK_SEC = 7 * 60 + 30; // 7:30
+
+  // Resolve the default playlist once, fetch every track's real duration
+  // (a plain resolve only fully populates a handful — the rest are id-only
+  // stubs), filter to the 3:30-7:30 window, seed the shared library with
+  // what's left, then — unless we just restored a specific pair above —
   // hand each deck a different random track from it as its own starting
   // point, a fresh pair every time the page loads.
   (function loadDefaultPlaylist(){
@@ -2231,20 +2248,25 @@
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.json();
     }).then(function(res){
-      var tracks = (res && res.kind === "playlist" && res.tracks) || [];
-      if (!tracks.length) throw new Error("Default playlist resolved with no tracks");
-      setInitialPlaylist(tracks);
+      var rawTracks = (res && res.kind === "playlist" && res.tracks) || [];
+      if (!rawTracks.length) throw new Error("Default playlist resolved with no tracks");
+      return fetchFullTracks(rawTracks);
+    }).then(function(tracks){
+      var filtered = tracks.filter(function(t){
+        return typeof t.duration === "number"
+          && t.duration >= MIN_DEFAULT_TRACK_SEC * 1000
+          && t.duration <= MAX_DEFAULT_TRACK_SEC * 1000;
+      });
+      if (!filtered.length) throw new Error("No tracks in the default playlist match the duration filter");
+      setInitialPlaylist(filtered);
       if (recoveredUrls) return; // decks already loaded above
 
-      var i = Math.floor(Math.random() * tracks.length);
+      var i = Math.floor(Math.random() * filtered.length);
       // Offset pick from the remaining N-1 tracks so B's default is always
-      // a *different* track than A's, unless the set only has one track.
-      var j = tracks.length > 1 ? (i + 1 + Math.floor(Math.random() * (tracks.length - 1))) % tracks.length : i;
-
-      Promise.all([ensureTrackUrl(tracks[i]), ensureTrackUrl(tracks[j])]).then(function(urls){
-        if (urls[0]) decks.A.loadTrack(urls[0]);
-        if (urls[1]) decks.B.loadTrack(urls[1]);
-      });
+      // a *different* track than A's, unless only one track passed the filter.
+      var j = filtered.length > 1 ? (i + 1 + Math.floor(Math.random() * (filtered.length - 1))) % filtered.length : i;
+      if (filtered[i].permalink_url) decks.A.loadTrack(filtered[i].permalink_url);
+      if (filtered[j].permalink_url) decks.B.loadTrack(filtered[j].permalink_url);
     }).catch(function(){
       // Nothing loaded (recovery, if any, already put its own tracks up
       // above) — surface it instead of leaving both decks silently blank.
