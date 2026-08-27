@@ -1831,6 +1831,11 @@
         if (!target) return;
         if (track.permalink_url){
           target.loadTrack(track.permalink_url);
+          // Close THIS deck's own modal — the one actually open right now.
+          // loadTrack()'s own closeLoadModal() call only closes the TARGET
+          // deck's modal, which does nothing when loading from A's list onto
+          // B (or vice versa), since A's modal was the one left open.
+          closeLoadModal();
           return;
         }
         // Still a truncated stub (fillMissingTrackData hasn't caught up
@@ -1845,6 +1850,7 @@
             playlistItems[idx] = full;
             renderAllPlaylists();
             target.loadTrack(full.permalink_url);
+            closeLoadModal();
           })
           .catch(function(err){ setStatus("Error: " + err.message, "err"); });
       }
