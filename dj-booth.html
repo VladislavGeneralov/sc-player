@@ -944,17 +944,11 @@
     settingsPanel.hidden = true;
   });
 
-  // Verified working end to end (resolve + actual progressive stream
-  // fetch, both 200) — the earlier on.soundcloud.com pair here had a
-  // stream broken on SoundCloud's own end (confirmed straight against
-  // api-v2, no proxy involved) for that specific label's content.
-  var DEFAULT_TRACK_URL_A = "https://on.soundcloud.com/00Md0tX9TcGTcTSj6h";
-  var DEFAULT_TRACK_URL_B = "https://on.soundcloud.com/PBUHGBPECoUT9U7ORb";
-  // Earlier defaults — kept out of the actual startup playback slots but
-  // still seeded into both decks' playlists on load, alongside the two
-  // above, so returning users still see all four familiar tracks.
-  var OLD_TRACK_URL_A = "https://soundcloud.com/recordeep-mag/premiere-unknown-artist-untitled-01-uknwn01?in_system_playlist=personalized-tracks%3A%3Ahooletronica%3A652496882";
-  var OLD_TRACK_URL_B = "https://soundcloud.com/peardublin/new-members-soma-pear005?in_system_playlist=personalized-tracks%3A%3Ahooletronica%3A652496882";
+  // Default library on first load: the whole set is seeded into the shared
+  // playlist, and two random (distinct, if the set has more than one track)
+  // picks from it become each deck's own starting track — a different pair
+  // every time the page opens.
+  var DEFAULT_PLAYLIST_URL = "https://soundcloud.com/vitalij-pak/sets/majestic-artwork-01";
 
   // =========================================================================
   // Deck factory — one Pioneer-CDJ-style deck (Web Audio playback engine:
@@ -1090,6 +1084,20 @@
     playlistItems = tracks.concat(playlistItems);
     renderAllPlaylists();
     fillMissingTrackData();
+  }
+
+  // A playlist resolve only fully populates the first handful of tracks —
+  // the rest come back truncated to just an id (fillMissingTrackData catches
+  // these up in the background, but startup's random pick can't wait for
+  // that) — fetch this one track's full data on demand if needed.
+  function ensureTrackUrl(track){
+    if (track.permalink_url) return Promise.resolve(track.permalink_url);
+    return proxyFetch("/api/tracks", { ids: String(track.id), client_id: clientId })
+      .then(function(r){
+        var arr = Array.isArray(r) ? r : (r && r.collection) || [];
+        return arr[0] && arr[0].permalink_url;
+      })
+      .catch(function(){ return null; });
   }
 
   function createDeck(opts){
@@ -1978,9 +1986,6 @@
       if (e.key === "Enter") els.loadBtn.click();
     });
 
-    els.url.value = opts.defaultTrackUrl;
-    loadTrack(opts.defaultTrackUrl);
-
     // Backgrounding the tab/app must not leave a deck playing into a
     // suspended AudioContext (silently, or worse, stuck) — a clean hard
     // stop-in-place, not the stutter-cue pause, so there's nothing left
@@ -2153,25 +2158,32 @@
   }
 
   // ---- instantiate: two decks, two mixer channels, wired together ----
-  var deckA = createDeck({ root: document.getElementById("deckA"), id: "A", defaultTrackUrl: DEFAULT_TRACK_URL_A, mirror: false });
-  var deckB = createDeck({ root: document.getElementById("deckB"), id: "B", defaultTrackUrl: DEFAULT_TRACK_URL_B, mirror: true });
+  var deckA = createDeck({ root: document.getElementById("deckA"), id: "A", mirror: false });
+  var deckB = createDeck({ root: document.getElementById("deckB"), id: "B", mirror: true });
 
-  // Seed the shared playlist with all four "known" tracks — the two
-  // currently loaded on startup plus the two older defaults — so returning
-  // users see them without having to re-paste links.
-  (function seedDefaultPlaylist(){
-    var urls = [DEFAULT_TRACK_URL_A, DEFAULT_TRACK_URL_B, OLD_TRACK_URL_A, OLD_TRACK_URL_B];
-    Promise.all(urls.map(function(url){
-      var qs = "url=" + encodeURIComponent(url) + "&client_id=" + encodeURIComponent(clientId);
-      return fetch(apiBase + "/api/resolve?" + qs).then(function(r){
-        if (!r.ok) throw new Error("HTTP " + r.status);
-        return r.json();
-      }).catch(function(){ return null; });
-    })).then(function(results){
-      var tracks = results.filter(function(r){ return r && r.kind === "track"; });
+  // Resolve the default playlist once, seed the shared library with its
+  // whole tracklist, then hand each deck a different random track from it as
+  // its own starting point — a fresh pair every time the page loads.
+  (function loadDefaultPlaylist(){
+    var qs = "url=" + encodeURIComponent(DEFAULT_PLAYLIST_URL) + "&client_id=" + encodeURIComponent(clientId);
+    fetch(apiBase + "/api/resolve?" + qs).then(function(r){
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    }).then(function(res){
+      var tracks = (res && res.kind === "playlist" && res.tracks) || [];
       if (!tracks.length) return;
       setInitialPlaylist(tracks);
-    });
+
+      var i = Math.floor(Math.random() * tracks.length);
+      // Offset pick from the remaining N-1 tracks so B's default is always
+      // a *different* track than A's, unless the set only has one track.
+      var j = tracks.length > 1 ? (i + 1 + Math.floor(Math.random() * (tracks.length - 1))) % tracks.length : i;
+
+      Promise.all([ensureTrackUrl(tracks[i]), ensureTrackUrl(tracks[j])]).then(function(urls){
+        if (urls[0]) decks.A.loadTrack(urls[0]);
+        if (urls[1]) decks.B.loadTrack(urls[1]);
+      });
+    }).catch(function(){});
   })();
 
   // Mobile/desktop browsers suspend (or fully discard) the AudioContext when
