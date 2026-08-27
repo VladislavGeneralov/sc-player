@@ -206,7 +206,7 @@
      current-time and remaining-time readouts. Double-click/double-tap syncs
      this deck to the other one. Padding+negative-margin enlarges the tap
      target (small text, easy to miss on mobile) without shifting the row layout. */
-  .d-bpm{color:var(--accent); cursor:pointer; padding:8px 12px; margin:-8px -12px;}
+  .d-bpm{color:var(--muted); cursor:pointer; padding:8px 12px; margin:-8px -12px;}
   /* Last 30s of the track: the remaining-time readout blinks as a warning. */
   @keyframes durBlink{ 0%,49.9%{opacity:1;} 50%,100%{opacity:0;} }
   .d-dur.blink-warn{ color:var(--bad); animation:durBlink 1s linear infinite; }
@@ -401,7 +401,7 @@
     background:linear-gradient(180deg,var(--metal-hi) 0%, var(--metal) 45%, var(--metal-low) 100%);
     border:1px solid var(--mx-black); border-radius:2px;
     box-shadow:0 10px 24px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.5);
-    padding:8px 8px 8px; width:100%; max-width:480px; margin:0 auto; overflow:hidden;
+    padding:3px 8px 8px; width:100%; max-width:480px; margin:0 auto; overflow:hidden; /* top trimmed 8->3: shave empty space above the knobs without touching element sizes */
   }
   /* CSS Grid instead of nested flex boxes — needed to make the crossfader's
      width an exact function of the fader columns' positions (grid-column
