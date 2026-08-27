@@ -1258,7 +1258,15 @@
       rateRamp = null;
       liveRate = r.toRate;
       startOffset = pos;
-      startedAtCtxTime = audioCtx.currentTime;
+      // Anchored to the ramp's own true end time, NOT audioCtx.currentTime
+      // ("now") — this only gets called lazily from waveLoop's rAF check, up
+      // to a frame late. pos was computed for the ramp's exact end instant;
+      // stamping it against a LATER "now" silently drops however many ms of
+      // real playback (at the already-settled toRate) happened in between,
+      // every single time a ramp finalizes. Two ramps per jog nudge (in and
+      // out), so repeated manual nudging compounds this into a growing
+      // display-only lag behind the real, correctly-playing audio.
+      startedAtCtxTime = r.startCtxTime + r.duration;
     }
 
     // Jog nudge: bend the live rate toward `toRate` over `duration`, retargeting
