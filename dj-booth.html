@@ -852,14 +852,41 @@
   var audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   var refreshOverlay = document.getElementById("refreshOverlay");
   function resumeCtx(){
-    // Rare, but the OS can fully discard the context (not just suspend it)
-    // after a long time backgrounded — rebuilding the whole audio graph live
-    // isn't worth it, so just ask for a reload instead of failing silently.
     if (audioCtx.state === "closed"){ refreshOverlay.classList.add("show"); return; }
     if (audioCtx.state === "suspended") audioCtx.resume();
   }
-  document.addEventListener("pointerdown", resumeCtx);
-  document.addEventListener("keydown", resumeCtx);
+
+  // iOS in particular can leave the AudioContext genuinely stuck — not
+  // "closed" (that's caught above), not cleanly "suspended" either — after a
+  // long background/interruption (phone call, Control Center audio, etc.):
+  // resume() silently does nothing, even called from a real tap. Rather than
+  // hand-rebuild the whole live node graph (fragile — every knob/fader
+  // closure would need rewiring), just reload the page, which always
+  // recreates a clean context — but first stash which two tracks were
+  // loaded so the reload restores them instead of picking a new random pair.
+  var RECOVER_KEY = "scdj_recover_urls";
+  var recoveryTriggered = false;
+  function recoverAudioEngine(){
+    if (recoveryTriggered) return;
+    recoveryTriggered = true;
+    try {
+      var urlA = decks.A && decks.A.getLoadedUrl();
+      var urlB = decks.B && decks.B.getLoadedUrl();
+      if (urlA || urlB) sessionStorage.setItem(RECOVER_KEY, JSON.stringify({ a: urlA, b: urlB }));
+    } catch (e){}
+    location.reload();
+  }
+  function resumeCtxAndVerify(){
+    if (audioCtx.state === "closed"){ refreshOverlay.classList.add("show"); return; }
+    if (audioCtx.state !== "suspended") return; // already running (or closed, handled above) — nothing to verify
+    var ctxAtCall = audioCtx;
+    audioCtx.resume();
+    setTimeout(function(){
+      if (audioCtx === ctxAtCall && audioCtx.state === "suspended") recoverAudioEngine();
+    }, 1000);
+  }
+  document.addEventListener("pointerdown", resumeCtxAndVerify);
+  document.addEventListener("keydown", resumeCtxAndVerify);
 
   // Keeps the screen from locking/sleeping while a deck is playing — mainly
   // to avoid the backgrounding scenario above happening as often in the
@@ -1144,6 +1171,7 @@
     var audioBuffer = null;
     var currentTrackKey = null;
     var deckBpm = null; // raw detected BPM (at the track's native tempo), filled in async after load
+    var lastLoadedUrl = null; // whatever URL loadTrack() was last called with — read by recoverAudioEngine()
     var waveSamples = null;
     var waveDragging = false, zoomDragging = false;
     var rafId = null;
@@ -1909,6 +1937,7 @@
     var loadGen = 0;
     function loadTrack(url){
       var myGen = ++loadGen;
+      lastLoadedUrl = url; // read by recoverAudioEngine() so a forced reload can restore this deck's track
       setStatus("LOADING...", "");
       deckBpm = null;
       updateBpmDisplay();
@@ -2006,7 +2035,7 @@
     // treats the deck as "not playing" — read by the wake-lock logic above,
     // which cares about "is this deck making sound" rather than play-state.
     function isAudible(){ return state === "playing" || state === "stuttering"; }
-    decks[opts.id] = { loadTrack: loadTrack, pauseForBackground: pauseForBackground, getSyncInfo: getSyncInfo, isAudible: isAudible, renderPlaylist: renderPlaylist };
+    decks[opts.id] = { loadTrack: loadTrack, pauseForBackground: pauseForBackground, getSyncInfo: getSyncInfo, isAudible: isAudible, renderPlaylist: renderPlaylist, getLoadedUrl: function(){ return lastLoadedUrl; } };
     return { output: gainNode };
   }
 
@@ -2169,9 +2198,24 @@
   var deckA = createDeck({ root: document.getElementById("deckA"), id: "A", mirror: false });
   var deckB = createDeck({ root: document.getElementById("deckB"), id: "B", mirror: true });
 
+  // If this load is a forced reload from recoverAudioEngine() (stuck iOS
+  // AudioContext), restore the same two tracks instead of picking a new
+  // random pair — one-shot (cleared immediately), so a normal future reload
+  // still gets a fresh random pair as usual.
+  var recoveredUrls = null;
+  try {
+    var recoverRaw = sessionStorage.getItem(RECOVER_KEY);
+    if (recoverRaw){ sessionStorage.removeItem(RECOVER_KEY); recoveredUrls = JSON.parse(recoverRaw); }
+  } catch (e){}
+  if (recoveredUrls){
+    if (recoveredUrls.a) decks.A.loadTrack(recoveredUrls.a);
+    if (recoveredUrls.b) decks.B.loadTrack(recoveredUrls.b);
+  }
+
   // Resolve the default playlist once, seed the shared library with its
-  // whole tracklist, then hand each deck a different random track from it as
-  // its own starting point — a fresh pair every time the page loads.
+  // whole tracklist, then — unless we just restored a specific pair above —
+  // hand each deck a different random track from it as its own starting
+  // point, a fresh pair every time the page loads.
   (function loadDefaultPlaylist(){
     var qs = "url=" + encodeURIComponent(DEFAULT_PLAYLIST_URL) + "&client_id=" + encodeURIComponent(clientId);
     fetch(apiBase + "/api/resolve?" + qs).then(function(r){
@@ -2181,6 +2225,7 @@
       var tracks = (res && res.kind === "playlist" && res.tracks) || [];
       if (!tracks.length) return;
       setInitialPlaylist(tracks);
+      if (recoveredUrls) return; // decks already loaded above
 
       var i = Math.floor(Math.random() * tracks.length);
       // Offset pick from the remaining N-1 tracks so B's default is always
@@ -2210,10 +2255,10 @@
       // again) — swallow that instead of leaving an unhandled rejection.
       audioCtx.suspend().catch(function(){});
     } else {
-      resumeCtx();
+      resumeCtxAndVerify();
     }
   });
-  window.addEventListener("focus", resumeCtx);
+  window.addEventListener("focus", resumeCtxAndVerify);
   var chA = createChannel("1", deckA.output,
     document.getElementById("eqColA"), document.getElementById("faderColA"), document.getElementById("meterA"));
   var chB = createChannel("2", deckB.output,
