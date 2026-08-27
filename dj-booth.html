@@ -856,10 +856,10 @@
     if (audioCtx.state === "suspended") audioCtx.resume();
   }
 
-  // iOS in particular can leave the AudioContext genuinely stuck — not
-  // "closed" (that's caught above), not cleanly "suspended" either — after a
+  // iOS in particular can leave the AudioContext genuinely stuck after a
   // long background/interruption (phone call, Control Center audio, etc.):
-  // resume() silently does nothing, even called from a real tap. Rather than
+  // state still reports "suspended" (not "closed" — that's caught above),
+  // but resume() silently does nothing, even called from a real tap. Rather than
   // hand-rebuild the whole live node graph (fragile — every knob/fader
   // closure would need rewiring), just reload the page, which always
   // recreates a clean context — but first stash which two tracks were
