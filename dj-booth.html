@@ -540,10 +540,18 @@
   /* Momentary channel-kill: held down = fader (and audio) drop to zero,
      released = fader snaps back to wherever it was. */
   .mx-topbtn{
+    position:relative;
     flex-shrink:0; width:20px; height:20px; padding:0; font-size:9px; line-height:1;
     border-radius:50%; background:var(--mx-black2); border:1px solid #000; color:var(--metal-mid);
     display:flex; align-items:center; justify-content:center; touch-action:none;
   }
+  /* Invisible expanded hit zone — buttons default to box-sizing:border-box
+     in Chrome's own UA stylesheet, so padding alone would just eat into the
+     visible 20px circle instead of growing the tap target. A generated
+     pseudo-element positioned past the button's own edges still counts for
+     click hit-testing (the click bubbles up through its parent) without
+     touching the circle's visible size or the topspacer's layout. */
+  .mx-topbtn::before{content:""; position:absolute; inset:-8px;}
   .mx-topbtn.active{background:var(--accent); color:#fff;}
   .mx-tri{display:inline-block; transform:translateY(1px);}
   .mx-meter{
