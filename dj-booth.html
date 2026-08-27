@@ -905,18 +905,16 @@
   var audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   var refreshOverlay = document.getElementById("refreshOverlay");
 
-  // First-visit onboarding — shown once, remembered in localStorage so it
-  // never comes back unless storage is cleared.
-  var WELCOME_SEEN_KEY = "scdj_welcome_seen";
+  // Onboarding — shown on every real page load/reload (not persisted), but
+  // never reappears from a quick background/foreground cycle on its own:
+  // that's a visibilitychange, not a reload, so this script (and this IIFE)
+  // never re-runs for it — nothing extra needed to keep it from popping back
+  // up just from switching apps and back.
   (function initWelcomeOverlay(){
     var overlay = document.getElementById("welcomeOverlay");
-    try {
-      if (localStorage.getItem(WELCOME_SEEN_KEY)) return;
-    } catch (e){}
     overlay.classList.add("show");
     document.getElementById("welcomeOk").addEventListener("click", function(){
       overlay.classList.remove("show");
-      try { localStorage.setItem(WELCOME_SEEN_KEY, "1"); } catch (e){}
     });
   })();
 
