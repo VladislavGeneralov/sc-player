@@ -879,11 +879,20 @@
   function resumeCtxAndVerify(){
     if (audioCtx.state === "closed"){ refreshOverlay.classList.add("show"); return; }
     if (audioCtx.state !== "suspended") return; // already running (or closed, handled above) — nothing to verify
-    var ctxAtCall = audioCtx;
-    audioCtx.resume();
-    setTimeout(function(){
-      if (audioCtx === ctxAtCall && audioCtx.state === "suspended") recoverAudioEngine();
-    }, 1000);
+    var done = false;
+    // Wait on the actual resume() outcome first (so a resume that's merely
+    // slow — main thread busy decoding another track, OS audio hardware
+    // spinning up — doesn't get mistaken for stuck) — the timeout is only a
+    // backstop for the genuinely-stuck case, where resume() itself never
+    // settles at all. 3s, not 1s: recovery forces a reload mid-set, so it's
+    // worth erring toward patience over a false trigger.
+    function check(){
+      if (done) return;
+      done = true;
+      if (audioCtx.state === "suspended") recoverAudioEngine();
+    }
+    audioCtx.resume().then(check).catch(check);
+    setTimeout(check, 3000);
   }
   document.addEventListener("pointerdown", resumeCtxAndVerify);
   document.addEventListener("keydown", resumeCtxAndVerify);
@@ -2035,7 +2044,7 @@
     // treats the deck as "not playing" — read by the wake-lock logic above,
     // which cares about "is this deck making sound" rather than play-state.
     function isAudible(){ return state === "playing" || state === "stuttering"; }
-    decks[opts.id] = { loadTrack: loadTrack, pauseForBackground: pauseForBackground, getSyncInfo: getSyncInfo, isAudible: isAudible, renderPlaylist: renderPlaylist, getLoadedUrl: function(){ return lastLoadedUrl; } };
+    decks[opts.id] = { loadTrack: loadTrack, pauseForBackground: pauseForBackground, getSyncInfo: getSyncInfo, isAudible: isAudible, renderPlaylist: renderPlaylist, getLoadedUrl: function(){ return lastLoadedUrl; }, setStatus: setStatus };
     return { output: gainNode };
   }
 
@@ -2223,7 +2232,7 @@
       return r.json();
     }).then(function(res){
       var tracks = (res && res.kind === "playlist" && res.tracks) || [];
-      if (!tracks.length) return;
+      if (!tracks.length) throw new Error("Default playlist resolved with no tracks");
       setInitialPlaylist(tracks);
       if (recoveredUrls) return; // decks already loaded above
 
@@ -2236,7 +2245,13 @@
         if (urls[0]) decks.A.loadTrack(urls[0]);
         if (urls[1]) decks.B.loadTrack(urls[1]);
       });
-    }).catch(function(){});
+    }).catch(function(){
+      // Nothing loaded (recovery, if any, already put its own tracks up
+      // above) — surface it instead of leaving both decks silently blank.
+      if (recoveredUrls) return;
+      decks.A.setStatus("Error: default playlist failed to load", "err");
+      decks.B.setStatus("Error: default playlist failed to load", "err");
+    });
   })();
 
   // Mobile/desktop browsers suspend (or fully discard) the AudioContext when
