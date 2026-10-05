@@ -117,10 +117,10 @@
     </div>
     <div class="status" id="status"></div>
     <details>
-      <summary>Плеер не грузит трек? (обновить client_id)</summary>
-      <p>SoundCloud периодически меняет публичный client_id, которым пользуется его собственный сайт. Если загрузка не работает: откройте soundcloud.com в браузере → DevTools → вкладка Network → найдите любой запрос к <code>api-v2.soundcloud.com</code> → скопируйте значение параметра <code>client_id</code> из его URL и вставьте сюда.</p>
+      <summary>Плеер не грузит трек? (свой client_id)</summary>
+      <p>Обычно ничего вписывать не нужно: прокси сам находит рабочий client_id SoundCloud. Поле — на крайний случай, если треки всё равно не грузятся: откройте soundcloud.com в браузере → DevTools → вкладка Network → найдите любой запрос к <code>api-v2.soundcloud.com</code> → скопируйте значение параметра <code>client_id</code> из его URL и вставьте сюда. Пустое поле + «Сохранить» — снова автоматически.</p>
       <div class="fixbox">
-        <input type="text" id="cidInput" placeholder="новый client_id">
+        <input type="text" id="cidInput" placeholder="пусто = автоматически">
         <button class="ghost" id="cidSave">Сохранить</button>
       </div>
     </details>
@@ -182,11 +182,12 @@
 (function(){
   "use strict";
 
-  // Public client_id used by soundcloud.com's own web client (extracted from its
-  // JS bundle and verified working on 2026-08-24). SoundCloud rotates this from
-  // time to time; if it stops working, paste a fresh one via the box below.
-  var DEFAULT_CLIENT_ID = "Pb72ranhoyt6gw7hM7TkzUItXlMWSNSo";
-  var clientId = localStorage.getItem("sc_client_id") || DEFAULT_CLIENT_ID;
+  // The proxy (worker.js / server.js) supplies a working client_id itself, so
+  // none is sent unless the user typed one in below. This one (soundcloud.com's
+  // public key, verified 2026-10-06) is only a fallback for an older proxy that
+  // still demands it (answers 400) or for a rejected manual key (401).
+  var DEFAULT_CLIENT_ID = "dkevB9EsY4jIoSm8RfddPNUKyn6hurXF";
+  var userClientId = localStorage.getItem("sc_client_id") || "";
 
   // Always loaded on startup for quick local testing.
   var DEFAULT_TRACK_URL = "https://soundcloud.com/hooletronica/ellectroniqa-greasy";
@@ -239,10 +240,9 @@
 
   els.cidSave.addEventListener("click", function(){
     var v = els.cidInput.value.trim();
-    if (!v) return;
-    localStorage.setItem("sc_client_id", v);
-    clientId = v;
-    setStatus("client_id обновлён, попробуйте загрузить трек снова.", "ok");
+    userClientId = v;
+    if (v) localStorage.setItem("sc_client_id", v); else localStorage.removeItem("sc_client_id");
+    setStatus(v ? "client_id сохранён, попробуйте загрузить трек снова." : "client_id снова подставляется автоматически.", "ok");
   });
 
   els.apiBaseSave.addEventListener("click", function(){
@@ -765,9 +765,20 @@
   // All api-v2.soundcloud.com calls go through a proxy (server.js locally, worker.js
   // when deployed) because that API only sends CORS headers for origin
   // https://soundcloud.com — a page served from anywhere else gets its fetch blocked.
+  // client_id goes along only if the user set one; otherwise the proxy picks
+  // its own. 400 (an older proxy that requires client_id) or 401 (key
+  // rejected) -> one retry with DEFAULT_CLIENT_ID.
   function proxyFetch(path, params){
-    var qs = Object.keys(params).map(function(k){ return k + "=" + encodeURIComponent(params[k]); }).join("&");
-    return fetch(apiBase + path + "?" + qs).then(function(r){
+    function attempt(cid){
+      var all = Object.assign({}, params);
+      if (cid) all.client_id = cid;
+      var qs = Object.keys(all).map(function(k){ return k + "=" + encodeURIComponent(all[k]); }).join("&");
+      return fetch(apiBase + path + "?" + qs);
+    }
+    return attempt(userClientId).then(function(r){
+      if ((r.status === 400 || r.status === 401) && userClientId !== DEFAULT_CLIENT_ID) return attempt(DEFAULT_CLIENT_ID);
+      return r;
+    }).then(function(r){
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.json();
     });
@@ -776,7 +787,7 @@
   function loadTrack(url){
     setStatus("Загрузка...", "");
     els.loadBtn.disabled = true;
-    proxyFetch("/api/resolve", { url: url, client_id: clientId })
+    proxyFetch("/api/resolve", { url: url })
       .then(function(track){
         if (track.kind !== "track"){
           throw new Error("Ссылка не ведёт на трек (плейлисты пока не поддерживаются)");
@@ -786,7 +797,7 @@
              || transcodings.find(function(x){ return x.format && x.format.protocol === "hls"; });
         if (!t) throw new Error("У трека нет доступного потока (защищён правообладателем)");
 
-        var streamPromise = proxyFetch("/api/media", { url: t.url, client_id: clientId });
+        var streamPromise = proxyFetch("/api/media", { url: t.url });
         var wavePromise = track.waveform_url
           ? fetch(track.waveform_url).then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; })
           : Promise.resolve(null);
