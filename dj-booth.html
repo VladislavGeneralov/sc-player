@@ -1608,7 +1608,11 @@
       renderTransportUI();
     }
 
-    function togglePlay(){ if (isPlayingLike()) pauseAction(); else playAction(); }
+    function togglePlay(){
+      // PLAY while CUE is held: commit the preview, keep playing (see below).
+      if (cuePreviewActive){ commitCuePreview(); return; }
+      if (isPlayingLike()) pauseAction(); else playAction();
+    }
 
     function hardSeek(pos){
       if (!audioBuffer) return;
@@ -1632,7 +1636,23 @@
       renderTransportUI();
     }
 
-    onTap(els.playBtn, togglePlay);
+    // Like a real CDJ: hold CUE (preview plays from the cue point), press
+    // PLAY with another finger — playback just carries on from wherever it
+    // is, and letting go of CUE afterwards no longer snaps back. Fires on
+    // PLAY's press (not release) so it reacts the instant it's hit; the tap
+    // that same finger completes on release is swallowed so it doesn't then
+    // pause.
+    var playCommitPointer = null;
+    els.playBtn.addEventListener("pointerdown", function(e){
+      playCommitPointer = null;
+      if (!cuePreviewActive) return;
+      commitCuePreview();
+      playCommitPointer = e.pointerId;
+    });
+    onTap(els.playBtn, function(e){
+      if (e.pointerId === playCommitPointer){ playCommitPointer = null; return; }
+      togglePlay();
+    });
 
     // Scoped by deck id too, not just track id — otherwise both decks share
     // one cue point whenever they happen to have the same track loaded.
@@ -1701,6 +1721,12 @@
       }
     });
     els.cueBtn.addEventListener("pointercancel", endCuePreview);
+    // A preview-hold is already normal playback under the hood, so
+    // committing it is just forgetting it was a preview.
+    function commitCuePreview(){
+      cuePreviewActive = false;
+      els.cueBtn.classList.remove("is-armed");
+    }
     function endCuePreview(){
       if (!cuePreviewActive) return;
       cuePreviewActive = false;
