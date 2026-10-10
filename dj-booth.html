@@ -1892,7 +1892,14 @@
 
     function computePeaks(buffer){
       var data = buffer.getChannelData(0);
-      var bucketSamples = Math.max(1, Math.round(buffer.sampleRate * zoomBucketDur));
+      var bucketSamples = Math.max(1, Math.round(buffer.sampleRate * 0.005));
+      // The bucket's real length must come from the rounded sample count,
+      // not the 5ms target: at 44.1kHz that's 221 samples (5.011ms), and
+      // indexing those as exact 5ms buckets made the zoom wave run ahead of
+      // the audio by 0.227% of the play position — ~136ms at 1:00, ~0.5s at
+      // 4:00 — so two decks at different positions disagreed visually even
+      // when they sounded locked (48kHz happens to be exact, hiding it).
+      zoomBucketDur = bucketSamples / buffer.sampleRate;
       var bucketCount = Math.ceil(data.length / bucketSamples);
       var peaks = new Float32Array(bucketCount * 2);
       for (var b = 0; b < bucketCount; b++){
