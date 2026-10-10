@@ -648,7 +648,7 @@
   .mx-xflabels{display:flex; justify-content:space-between; width:110px; font-size:9px; color:var(--mx-ink-muted); font-weight:700;}
 
   /* Soft orange glow on whichever fader cap is actively being dragged.
-     Driven by a JS-toggled class (wireDragGlow), not :active — :active on a
+     Driven by a JS-toggled class (wireRange), not :active — :active on a
      native range input is unreliable for touch drags on some mobile
      browsers (only reflects a held mouse button reliably), so the class is
      toggled explicitly on pointerdown/up/cancel instead. */
@@ -766,13 +766,90 @@
     d.textContent = s == null ? "" : String(s);
     return d.innerHTML;
   }
-  // Toggles .is-dragging on a native range input for the orange grab-glow —
-  // JS-driven rather than relying on :active, which doesn't reliably track
-  // touch drags on every mobile browser.
-  function wireDragGlow(el){
-    el.addEventListener("pointerdown", function(){ el.classList.add("is-dragging"); });
-    el.addEventListener("pointerup", function(){ el.classList.remove("is-dragging"); });
-    el.addEventListener("pointercancel", function(){ el.classList.remove("is-dragging"); });
+  // Multitouch: the browser's own <input type=range> drag is a single
+  // gesture per page (iOS won't move a second slider while another finger
+  // is down, and the pinch-blocking touchmove handler below kills native
+  // drags once 2+ fingers touch), so every slider is driven from pointer
+  // events instead — each finger gets its own pointerId + capture, fully
+  // independent of the others. The input stays a real range (value, min/max,
+  // step, "input" events, thumb styling) — only the dragging is replaced.
+  // axis: "x" = min at left, "up" = rotated -90deg (min at bottom),
+  // "down" = rotated 90deg (min at top). thumbPx = thumb length along the
+  // travel axis in unscaled CSS px — native ranges map the value to the
+  // thumb's center over (length - thumb), so this matches their geometry.
+  // Grabbing the thumb drags it relative to where it was grabbed (no jump);
+  // touching the track elsewhere jumps there, like the native control.
+  // Also toggles .is-dragging for the orange grab-glow (JS-driven rather
+  // than :active, which doesn't reliably track touch drags on mobile).
+  function wireRange(el, axis, thumbPx){
+    var activeId = null, grabOffset = 0;
+    function geom(){
+      var r = el.getBoundingClientRect();
+      var len = axis === "x" ? r.width : r.height;
+      var thumb = thumbPx * (len / (el.offsetWidth || len));
+      return {
+        start: axis === "x" ? r.left : (axis === "down" ? r.top : r.bottom),
+        dir: axis === "up" ? -1 : 1,
+        thumb: thumb, travel: Math.max(1, len - thumb)
+      };
+    }
+    function fracAt(g, e){
+      var p = axis === "x" ? e.clientX : e.clientY;
+      return ((p - g.start) * g.dir - g.thumb / 2) / g.travel;
+    }
+    function curFrac(){
+      var min = parseFloat(el.min), max = parseFloat(el.max);
+      return (parseFloat(el.value) - min) / (max - min);
+    }
+    function setFrac(f){
+      var min = parseFloat(el.min), max = parseFloat(el.max);
+      var prev = el.value;
+      el.value = min + clamp(f, 0, 1) * (max - min); // snaps to step itself
+      if (el.value !== prev) el.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    function end(e){
+      if (e.pointerId !== activeId) return;
+      activeId = null;
+      el.classList.remove("is-dragging");
+    }
+    // Keep the browser's native drag out of it entirely, or it would fight
+    // the pointer-driven value on every move.
+    el.addEventListener("touchstart", function(e){ e.preventDefault(); }, { passive: false });
+    el.addEventListener("mousedown", function(e){ e.preventDefault(); });
+    el.addEventListener("pointerdown", function(e){
+      if (activeId !== null || e.button > 0) return; // one finger per slider
+      e.preventDefault();
+      activeId = e.pointerId;
+      try { el.setPointerCapture(e.pointerId); } catch(err){}
+      el.classList.add("is-dragging");
+      var g = geom(), f = fracAt(g, e), off = f - curFrac();
+      grabOffset = Math.abs(off * g.travel) <= g.thumb / 2 + 4 ? off : 0;
+      setFrac(f - grabOffset);
+    });
+    el.addEventListener("pointermove", function(e){
+      if (e.pointerId !== activeId) return;
+      setFrac(fracAt(geom(), e) - grabOffset);
+    });
+    el.addEventListener("pointerup", end);
+    el.addEventListener("pointercancel", end);
+    el.addEventListener("lostpointercapture", end);
+  }
+  // "click" is synthesized from a single-touch tap — while another finger is
+  // already holding a fader/knob/CUE, mobile browsers often never fire it.
+  // Tap detection straight off pointer events works per finger instead.
+  function onTap(el, fn){
+    var id = null, x0 = 0, y0 = 0;
+    el.addEventListener("pointerdown", function(e){
+      if (e.button > 0) return;
+      id = e.pointerId; x0 = e.clientX; y0 = e.clientY;
+    });
+    el.addEventListener("pointerup", function(e){
+      if (e.pointerId !== id) return;
+      id = null;
+      if (Math.abs(e.clientX - x0) > 12 || Math.abs(e.clientY - y0) > 12) return; // was a drag
+      fn(e);
+    });
+    el.addEventListener("pointercancel", function(e){ if (e.pointerId === id) id = null; });
   }
   function fmt(t){
     if (!isFinite(t) || t < 0) t = 0;
@@ -1334,7 +1411,7 @@
       var c = clamp(cur, -r, r);
       if (c !== cur){ els.speed.value = c; setTempo(c); }
     }
-    els.rangeBtn.addEventListener("click", function(){
+    onTap(els.rangeBtn, function(){
       pitchRangeIdx = (pitchRangeIdx + 1) % PITCH_RANGES.length;
       applyPitchRange();
     });
@@ -1555,7 +1632,7 @@
       renderTransportUI();
     }
 
-    els.playBtn.addEventListener("click", togglePlay);
+    onTap(els.playBtn, togglePlay);
 
     // Scoped by deck id too, not just track id — otherwise both decks share
     // one cue point whenever they happen to have the same track loaded.
@@ -1656,8 +1733,8 @@
       drawZoom();
     }
     els.speed.addEventListener("input", function(){ setTempo(els.speed.value); });
-    wireDragGlow(els.speed);
-    els.speedReset.addEventListener("click", function(){ els.speed.value = 0; setTempo(0); });
+    wireRange(els.speed, "down", 30);
+    onTap(els.speedReset, function(){ els.speed.value = 0; setTempo(0); });
     applyPitchRange();
     setTempo(0);
 
@@ -1715,11 +1792,12 @@
     // touch-action:manipulation globally (removes the ~300ms tap delay and
     // disables double-tap-to-zoom) — most mobile browsers stop synthesizing
     // a dblclick event once they no longer need to distinguish single vs.
-    // double tap for zooming. Detect it manually off the (fast, reliable on
-    // both mouse and touch) click event instead.
+    // double tap for zooming. Detect it manually off per-finger taps
+    // (onTap) instead — those also still register while another finger is
+    // holding a fader, which synthesized clicks don't.
     var DBLTAP_MS = 350;
     var lastBpmClickTime = 0;
-    els.bpmEl.addEventListener("click", function(){
+    onTap(els.bpmEl, function(){
       var now = Date.now();
       if (now - lastBpmClickTime < DBLTAP_MS){
         lastBpmClickTime = 0; // require two fresh taps before firing again
@@ -2184,24 +2262,31 @@
       if (o.valEl) o.valEl.textContent = o.format ? o.format(value) : Math.round(value*100) + "%";
     }
     function setValue(v){ value = clamp(v, o.min, o.max); render(); if (o.onChange) o.onChange(value); }
-    var dragging = false, startY = 0, startVal = 0;
+    // Tracked per pointerId so a second finger landing on the same knob
+    // can't hijack (or end) the first one's drag — multitouch safe.
+    var dragId = null, startY = 0, startVal = 0;
+    function endDrag(e){
+      if (e.pointerId !== dragId) return;
+      dragId = null; o.el.classList.remove("is-dragging");
+    }
     o.el.addEventListener("pointerdown", function(e){
-      dragging = true; startY = e.clientY; startVal = value;
+      if (dragId !== null) return;
+      dragId = e.pointerId; startY = e.clientY; startVal = value;
       o.el.classList.add("is-dragging");
       o.el.setPointerCapture(e.pointerId); resumeCtx();
     });
     o.el.addEventListener("pointermove", function(e){
-      if (!dragging) return;
+      if (e.pointerId !== dragId) return;
       setValue(startVal + ((startY - e.clientY) / 150) * (o.max - o.min));
     });
-    o.el.addEventListener("pointerup", function(){ dragging = false; o.el.classList.remove("is-dragging"); });
-    o.el.addEventListener("pointercancel", function(){ dragging = false; o.el.classList.remove("is-dragging"); });
+    o.el.addEventListener("pointerup", endDrag);
+    o.el.addEventListener("pointercancel", endDrag);
     // Native dblclick doesn't fire on touch here (same reason as the BPM
     // sync tap — touch-action:manipulation removes the double-tap gesture
     // browsers use to decide whether to synthesize it) — detect it manually
-    // off click instead, same as the BPM readout.
+    // off per-finger taps instead, same as the BPM readout.
     var lastClickTime = 0;
-    o.el.addEventListener("click", function(){
+    onTap(o.el, function(){
       var now = Date.now();
       if (now - lastClickTime < 350){
         lastClickTime = 0;
@@ -2227,7 +2312,7 @@
   function buildFader(mountEl){
     mountEl.innerHTML = '<input type="range" min="0" max="1" step="0.001" value="1">';
     var input = mountEl.querySelector("input");
-    wireDragGlow(input);
+    wireRange(input, "up", 15);
     return input;
   }
   function buildMeterSegs(meterEl){
@@ -2422,7 +2507,7 @@
     document.getElementById("eqColB"), document.getElementById("faderColB"), document.getElementById("meterB"));
 
   var xfEl = document.getElementById("crossfader");
-  wireDragGlow(xfEl);
+  wireRange(xfEl, "x", 15);
   function applyCrossfader(pos){
     var angle = pos * Math.PI / 2;
     smoothSet(chA.xfade.gain, Math.cos(angle));
