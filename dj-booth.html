@@ -1502,8 +1502,12 @@
     var NUDGE_PERCENT = 7.36;   // how far a held jog button bends the rate (was 8, -8% relative; before that 6, then 4)
     var NUDGE_RAMP_IN = 0.1;    // seconds to bend in — stays quick, snappy response
     var NUDGE_RAMP_OUT = 0.3;   // seconds to settle back to tempo — slower, smoother release
-    function nudgeStart(direction){ startRateRamp(currentRate * (1 + direction * NUDGE_PERCENT / 100), NUDGE_RAMP_IN); }
-    function nudgeEnd(){ startRateRamp(currentRate, NUDGE_RAMP_OUT); }
+    var nudgeDir = 0; // -1/+1 while a jog button is held, 0 otherwise
+    // The rate playback should be heading for right now: the set tempo,
+    // bent by the jog nudge while one is held.
+    function targetRate(){ return currentRate * (1 + nudgeDir * NUDGE_PERCENT / 100); }
+    function nudgeStart(direction){ nudgeDir = direction; startRateRamp(targetRate(), NUDGE_RAMP_IN); }
+    function nudgeEnd(){ nudgeDir = 0; startRateRamp(currentRate, NUDGE_RAMP_OUT); }
 
     function startSteadyPlayback(pos){
       // A fully-closed context (see resumeCtx's refresh-overlay branch) can't
@@ -1742,15 +1746,26 @@
     function setTempo(percent){
       percent = parseFloat(percent);
       currentRate = 1 + percent / 100;
-      // While a jog nudge is bending the rate, leave it alone — the new
-      // set-tempo just becomes whatever it settles back to on release.
-      if (!rateRamp && sourceNode && (state === "playing" || state === "stuttering")){
-        if (state === "playing"){
+      if (sourceNode && state === "playing"){
+        if (rateRamp){
+          // A jog ramp is in flight (bending in, or settling back after
+          // release): retarget it to the new rate, keeping its end time —
+          // otherwise it would finish on the OLD tempo and the fader move
+          // would never reach the audio (display showing one tempo, track
+          // playing another until the fader was touched again).
+          var left = rateRamp.duration - (audioCtx.currentTime - rateRamp.startCtxTime);
+          startRateRamp(targetRate(), Math.max(0.02, left));
+        } else {
+          // Steady (incl. a held jog whose ramp-in already finished — the
+          // nudge then rides on top of the new tempo instead of being
+          // cancelled by it).
           var pos = getPosition();
           startOffset = pos;
           startedAtCtxTime = audioCtx.currentTime;
-          liveRate = currentRate;
+          liveRate = targetRate();
+          sourceNode.playbackRate.setValueAtTime(liveRate, audioCtx.currentTime);
         }
+      } else if (sourceNode && state === "stuttering"){
         sourceNode.playbackRate.setValueAtTime(currentRate, audioCtx.currentTime);
       }
       var sign = percent > 0 ? "+" : "";
